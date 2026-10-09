@@ -65,7 +65,12 @@ async function readJson(req) {
     return body ? JSON.parse(body) : {};
 }
 
-const SNIPPETS = { local: "local_agent.py", foundry: "foundry_agent.py" };
+const SNIPPETS = {
+    local: "local_agent.py",
+    foundry: "foundry_agent.py",
+    stateless: "memory_stateless_agent.py",
+    session: "memory_session_agent.py",
+};
 
 function freshCards() {
     return new Map(COMPONENTS.map((c) => [c.id, { stage: 0, scrambled: [] }]));

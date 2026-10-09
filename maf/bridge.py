@@ -35,13 +35,19 @@ def send(obj):
 async def handle(req):
     rid = req.get("id")
     try:
-        modules = {"local": "local_agent", "foundry": "foundry_agent"}
+        modules = {
+            "local": "local_agent",
+            "foundry": "foundry_agent",
+            "stateless": "memory_stateless_agent",
+            "session": "memory_session_agent",
+        }
         if req.get("model") not in modules:
-            raise ValueError("Select either the local or Foundry model.")
+            raise ValueError("Select a valid model.")
         selected_agent = importlib.import_module(modules[req["model"]])
 
         if req["type"] == "reset":
-            selected_agent.session = selected_agent.agent.create_session()
+            if hasattr(selected_agent, "session"):
+                selected_agent.session = selected_agent.agent.create_session()
         else:
             async for text in selected_agent.chat(req["message"]):
                 send({"id": rid, "delta": text})
