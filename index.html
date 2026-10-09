@@ -143,6 +143,15 @@
   .code .k { color: #ff7b72; } .code .s { color: #a5d6ff; } .code .c { color: #8b949e; font-style: italic; } .code .f { color: #d2a8ff; }
   .code .hl { background: color-mix(in srgb, #d29922 25%, transparent); border-radius: 3px; }
   .file { font-family: var(--font-mono, Consolas, monospace); font-size: 12px; color: var(--text-color-muted, #8b949e); }
+
+  /* Screen 4: short-term memory comparison */
+  .s4 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; max-width: 1200px; margin: 0 auto; height: calc(100vh - 190px); min-height: 520px; }
+  @media (max-width: 860px) { .s4 { grid-template-columns: 1fr; height: auto; } }
+  .s4 .messages { min-height: 120px; }
+  .s4 .hood { flex: none; max-height: 45%; padding: 12px 16px; border-top: 1px solid var(--border-color-default, #30363d); gap: 10px; }
+  .s4 .hood.open { max-height: 55%; }
+  .s4 .hood-hint { margin: 0; color: var(--text-color-muted, #8b949e); }
+  .s4 pre.code { font-size: 13px; line-height: 19px; }
 </style>
 </head>
 <body>
@@ -266,6 +275,49 @@
           <div class="hood-icon">🚗</div>
           <p>What code connects this chat to the model?</p>
           <button class="navbtn bigbtn" id="lookBtn">Look under the hood</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen">
+    <div class="s3-head">
+      <h1>Short-term memory</h1>
+      <span class="sub">Same model, same instructions. The only difference is the session.</span>
+    </div>
+    <div class="s4">
+      <div class="panel" id="mem-stateless">
+        <div class="panel-head">
+          <div class="avatar">AI</div>
+          <div><div class="title">Without memory</div><div class="meta">No session · phi3:3.8b via Ollama</div></div>
+          <span class="spacer"></span>
+          <button class="newChat">New chat</button>
+        </div>
+        <div class="messages"><div class="empty">💬 Tell it your name, then ask what it is</div></div>
+        <form class="composer">
+          <textarea placeholder="Type a message… (Enter to send)"></textarea>
+          <button class="navbtn">Send</button>
+        </form>
+        <div class="hood">
+          <p class="hood-hint">How does this agent forget?</p>
+          <button class="navbtn lookBtn">Look under the hood</button>
+        </div>
+      </div>
+      <div class="panel" id="mem-session">
+        <div class="panel-head">
+          <div class="avatar">AI</div>
+          <div><div class="title">With short-term memory</div><div class="meta">Session · phi3:3.8b via Ollama</div></div>
+          <span class="spacer"></span>
+          <button class="newChat">New chat</button>
+        </div>
+        <div class="messages"><div class="empty">💬 Tell it your name, then ask what it is</div></div>
+        <form class="composer">
+          <textarea placeholder="Type a message… (Enter to send)"></textarea>
+          <button class="navbtn">Send</button>
+        </form>
+        <div class="hood">
+          <p class="hood-hint">How does this agent remember?</p>
+          <button class="navbtn lookBtn">Look under the hood</button>
         </div>
       </div>
     </div>
@@ -401,6 +453,96 @@
   $("composer").onsubmit = sendMessage;
   $("prompt").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) sendMessage(e); };
   $("lookBtn").onclick = lookUnderTheHood;
+</script>
+<script>
+  // Screen 4: two independent chats, one stateless and one session-based
+  function memoryChat(root, model) {
+    const q = (s) => root.querySelector(s);
+    const messages = q(".messages"), prompt = q("textarea"), send = q(".composer .navbtn"), newChat = q(".newChat"), hood = q(".hood");
+    const hint = hood.querySelector(".hood-hint").textContent;
+    const emptyHtml = messages.innerHTML;
+    let busy = false;
+
+    function setBusy(v) { busy = v; send.disabled = v; newChat.disabled = v; }
+
+    function addMsg(role, text) {
+      messages.querySelector(".empty")?.remove();
+      const el = document.createElement("div");
+      el.className = "msg " + role;
+      el.innerHTML = `<div class="avatar">${role === "user" ? "You" : "AI"}</div><div class="bubble"></div>`;
+      el.querySelector(".bubble").textContent = text;
+      messages.appendChild(el);
+      messages.scrollTop = messages.scrollHeight;
+      return el.querySelector(".bubble");
+    }
+
+    async function sendMessage(e) {
+      e.preventDefault();
+      const message = prompt.value.trim();
+      if (!message || busy) return;
+      setBusy(true); prompt.value = "";
+      addMsg("user", message);
+      const bubble = addMsg("assistant", "");
+      bubble.classList.add("typing");
+      try {
+        const res = await fetch("/api/chat", { method: "POST", body: JSON.stringify({ model, message }) });
+        if (!res.ok) throw new Error(await res.text());
+        const reader = res.body.getReader(), dec = new TextDecoder();
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          bubble.textContent += dec.decode(value, { stream: true });
+          messages.scrollTop = messages.scrollHeight;
+        }
+      } catch (err) {
+        bubble.textContent = "⚠️ " + err.message;
+      }
+      bubble.classList.remove("typing");
+      setBusy(false); prompt.focus();
+    }
+
+    function closeHood() {
+      hood.className = "hood";
+      hood.innerHTML = `<p class="hood-hint">${hint}</p><button class="navbtn lookBtn">Look under the hood</button>`;
+      hood.querySelector(".lookBtn").onclick = openHood;
+    }
+
+    async function openHood() {
+      let code;
+      try {
+        const res = await fetch("/api/snippet?model=" + model);
+        if (!res.ok) throw new Error(await res.text());
+        code = await res.text();
+      } catch (err) {
+        hood.textContent = "⚠️ Could not load code: " + err.message;
+        return;
+      }
+      hood.className = "hood open";
+      hood.innerHTML = `<div class="file">maf/memory_${model}_agent.py · the exact code running this chat</div><pre class="code">${highlight(code)}</pre>
+        <div><button class="hideBtn">Hide code</button></div>`;
+      hood.querySelector(".hideBtn").onclick = closeHood;
+    }
+
+    newChat.onclick = async () => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model }) });
+        const result = await res.json();
+        if (!result.ok) throw new Error(result.error);
+        messages.innerHTML = emptyHtml;
+      } catch (err) {
+        addMsg("assistant", "⚠️ Could not reset chat: " + err.message);
+      } finally {
+        setBusy(false);
+      }
+    };
+    q(".composer").onsubmit = sendMessage;
+    prompt.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) sendMessage(e); };
+    hood.querySelector(".lookBtn").onclick = openHood;
+  }
+  memoryChat(document.getElementById("mem-stateless"), "stateless");
+  memoryChat(document.getElementById("mem-session"), "session");
 </script>
 <script>
   const HUES = ["#a371f7", "#2f81f7", "#3fb950", "#d29922", "#db61a2", "#f85149"];

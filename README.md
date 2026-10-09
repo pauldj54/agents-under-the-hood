@@ -9,8 +9,19 @@ implementation, not yet a standalone browser app.
 - `extension.mjs`: Copilot canvas registration and loopback HTTP server.
 - `index.html`: the three-screen UI.
 - `components.mjs`: reveal-card content and helpers.
-- `maf\`: Python Agent Framework bridge, local and Foundry agents, dependencies,
-  and an example configuration.
+- `maf\`: Python Agent Framework bridge, local and Foundry agents, the two
+  short-term memory demo agents (`memory_stateless_agent.py`,
+  `memory_session_agent.py`), dependencies, and an example configuration.
+
+## Screens
+
+1. Six reveal cards.
+2. The agent harness.
+3. Connecting to an LLM (local Phi or Foundry).
+4. Short-term memory: two chats side by side on the local Phi model, one
+   stateless (`agent.run(message)`) and one using a session
+   (`agent.run(message, session=session)`). Each has a "Look under the hood"
+   button that shows its exact code. Requires `ollama pull phi3:3.8b`.
 
 The source lives at the project root deliberately. Copilot discovers project
 extensions under `.github\extensions\`, so this copy does not register a second
