@@ -1,7 +1,7 @@
 import re
 from typing import Any
 
-from agent_framework import Agent, AgentSession, ContextProvider, SessionContext
+from agent_framework import Agent, AgentSession, ContextProvider, Message, SessionContext
 from agent_framework.ollama import OllamaChatClient
 from pydantic import BaseModel
 
@@ -11,15 +11,20 @@ class UserMemory(BaseModel):
     favourite_colour: str | None = None
 
 
-COLOUR = re.compile(r"favou?rite colou?r is\s+([A-Za-z ]+)", re.IGNORECASE)
+EXTRACT = (
+    "Extract the favourite colour that the user states about themselves, in English, as a single word. "
+    "Questions and greetings do not state a colour. "
+    "Reply with only that word, or NONE if the message does not state one."
+)
 
 
 # 2. A context provider hooks into every run: it reads the memory before the
 #    model is called and updates it after the response
 class FavouriteColourMemory(ContextProvider):
-    def __init__(self, memory: UserMemory):
+    def __init__(self, memory: UserMemory, client: OllamaChatClient):
         super().__init__(source_id="favourite-colour-memory")
         self.memory = memory
+        self.client = client
 
     async def before_run(
         self, *, agent: Any, session: AgentSession, context: SessionContext, state: dict[str, Any]
@@ -34,9 +39,15 @@ class FavouriteColourMemory(ContextProvider):
         self, *, agent: Any, session: AgentSession, context: SessionContext, state: dict[str, Any]
     ) -> None:
         for msg in context.get_messages(include_input=True):
-            match = msg.role == "user" and COLOUR.search(msg.text or "")
-            if match:
-                self.memory.favourite_colour = match.group(1).strip().rstrip(".").capitalize()
+            if msg.role != "user" or not msg.text or "?" in msg.text:
+                continue
+            # Ask the model to pull out the colour, so any language or phrasing works
+            reply = await self.client.get_response(
+                [Message("system", [EXTRACT]), Message("user", [msg.text])]
+            )
+            colour = re.sub(r"[^A-Za-z ]", "", reply.text or "").strip()
+            if colour and colour.upper() != "NONE" and len(colour.split()) == 1:
+                self.memory.favourite_colour = colour.capitalize()
 
 
 memory = UserMemory()
@@ -48,7 +59,7 @@ agent = Agent(
     client=client,
     name="MemoryPhi",
     instructions="You are a friendly assistant.",
-    context_providers=[FavouriteColourMemory(memory)],
+    context_providers=[FavouriteColourMemory(memory, client)],
 )
 
 session = agent.create_session()
