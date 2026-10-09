@@ -152,6 +152,13 @@
   .s4 .hood.open { max-height: 55%; }
   .s4 .hood-hint { margin: 0; color: var(--text-color-muted, #8b949e); }
   .s4 pre.code { font-size: 13px; line-height: 19px; }
+
+  /* Screen 5: long-term memory */
+  .memcard { margin: 14px 16px 0; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border-color-default, #30363d); }
+  .memval { font-size: 28px; font-weight: 700; margin-top: 4px; color: var(--text-color-muted, #8b949e); transition: color .3s; }
+  .memval.known { color: #a371f7; }
+  .memval.flash { animation: memflash .8s ease; }
+  @keyframes memflash { 0% { transform: scale(1.25); } 100% { transform: scale(1); } }
 </style>
 </head>
 <body>
@@ -322,6 +329,39 @@
       </div>
     </div>
   </section>
+
+  <section class="screen">
+    <div class="s3-head">
+      <h1>Long-term memory</h1>
+      <span class="sub">A context provider remembers the user's favourite colour, even across sessions.</span>
+    </div>
+    <div class="s3">
+      <div class="panel" id="lt">
+        <div class="panel-head">
+          <div class="avatar">AI</div>
+          <div><div class="title">MemoryPhi</div><div class="meta">Agent + context provider · phi3:3.8b via Ollama</div></div>
+          <span class="spacer"></span>
+          <button class="newChat">New session</button>
+        </div>
+        <div class="messages"><div class="empty">💬 Say hello, tell it your favourite colour, then start a new session</div></div>
+        <form class="composer">
+          <textarea placeholder="Type a message… (Enter to send)"></textarea>
+          <button class="navbtn">Send</button>
+        </form>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="title">🧠 Long-term memory</span><span class="spacer"></span><button id="ltForget">Forget me</button></div>
+        <div class="memcard">
+          <div class="file">favourite_colour</div>
+          <div class="memval" id="ltColour">unknown</div>
+        </div>
+        <div class="hood" id="ltHood">
+          <p class="hood-hint">How does the agent remember across sessions?</p>
+          <button class="navbtn bigbtn" id="ltLook">Look under the hood</button>
+        </div>
+      </div>
+    </div>
+  </section>
 <script>
   const screens = [...document.querySelectorAll(".screen")];
   const back = document.getElementById("back"), next = document.getElementById("next");
@@ -392,7 +432,7 @@
 
   function highlight(code) {
     const esc = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return esc.replace(/(#.*$)|("[^"\n]*")|\b(from|import|async|def|await|for|in|if|return|yield|None|str)\b|\b(OllamaChatClient|FoundryChatClient|AzureCliCredential|Agent|create_session|run|chat)\b/gm,
+    return esc.replace(/(#.*$)|("[^"\n]*")|\b(from|import|async|def|await|for|in|if|else|class|return|yield|None|str)\b|\b(OllamaChatClient|FoundryChatClient|AzureCliCredential|Agent|ContextProvider|create_session|run|chat)\b/gm,
       (m, c, s, k, f) => c ? `<span class="c">${c}</span>`
         : s ? `<span class="s${/localhost|phi3|services.ai.azure.com|MAI-Thinking/.test(s) ? " hl" : ""}">${s}</span>`
         : k ? `<span class="k">${k}</span>` : `<span class="f">${f}</span>`);
@@ -543,6 +583,105 @@
   }
   memoryChat(document.getElementById("mem-stateless"), "stateless");
   memoryChat(document.getElementById("mem-session"), "session");
+</script>
+<script>
+  // Screen 6: long-term memory (favourite colour)
+  (function () {
+    const root = document.getElementById("lt");
+    const messages = root.querySelector(".messages"), prompt = root.querySelector("textarea"), send = root.querySelector(".composer .navbtn");
+    const newSession = root.querySelector(".newChat"), forget = $("ltForget"), hood = $("ltHood");
+    const emptyHtml = messages.innerHTML;
+    let busy = false;
+    const setBusy = (v) => { busy = v; send.disabled = v; newSession.disabled = v; forget.disabled = v; };
+
+    function addMsg(role, text) {
+      messages.querySelector(".empty")?.remove();
+      const el = document.createElement("div");
+      el.className = "msg " + role;
+      el.innerHTML = `<div class="avatar">${role === "user" ? "You" : "AI"}</div><div class="bubble"></div>`;
+      el.querySelector(".bubble").textContent = text;
+      messages.appendChild(el);
+      messages.scrollTop = messages.scrollHeight;
+      return el.querySelector(".bubble");
+    }
+
+    function showMemory(mem) {
+      const el = $("ltColour"), val = mem?.favourite_colour;
+      const changed = el.textContent !== (val || "unknown");
+      el.textContent = val || "unknown";
+      el.classList.toggle("known", !!val);
+      if (changed && val) { el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
+    }
+
+    async function memory(action) {
+      const res = await fetch("/api/memory", { method: "POST", body: JSON.stringify({ action }) });
+      const mem = await res.json();
+      if (mem.error) throw new Error(mem.error);
+      showMemory(mem);
+    }
+
+    async function sendMessage(e) {
+      e.preventDefault();
+      const message = prompt.value.trim();
+      if (!message || busy) return;
+      setBusy(true); prompt.value = "";
+      addMsg("user", message);
+      const bubble = addMsg("assistant", "");
+      bubble.classList.add("typing");
+      try {
+        const res = await fetch("/api/chat", { method: "POST", body: JSON.stringify({ model: "longterm", message }) });
+        if (!res.ok) throw new Error(await res.text());
+        const reader = res.body.getReader(), dec = new TextDecoder();
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          bubble.textContent += dec.decode(value, { stream: true });
+          messages.scrollTop = messages.scrollHeight;
+        }
+        await memory("get");
+      } catch (err) {
+        bubble.textContent = "⚠️ " + err.message;
+      }
+      bubble.classList.remove("typing");
+      setBusy(false); prompt.focus();
+    }
+
+    async function run(fn) {
+      if (busy) return;
+      setBusy(true);
+      try { await fn(); } catch (err) { addMsg("assistant", "⚠️ " + err.message); } finally { setBusy(false); }
+    }
+
+    newSession.onclick = () => run(async () => {
+      const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model: "longterm" }) });
+      const result = await res.json();
+      if (!result.ok) throw new Error(result.error);
+      messages.innerHTML = emptyHtml;
+    });
+    forget.onclick = () => run(async () => { await memory("forget"); messages.innerHTML = emptyHtml; });
+
+    function closeHood() {
+      hood.className = "hood";
+      hood.innerHTML = `<p class="hood-hint">How does the agent remember across sessions?</p><button class="navbtn bigbtn" id="ltLook">Look under the hood</button>`;
+      $("ltLook").onclick = openHood;
+    }
+    async function openHood() {
+      try {
+        const res = await fetch("/api/snippet?model=longterm");
+        if (!res.ok) throw new Error(await res.text());
+        hood.className = "hood open";
+        hood.innerHTML = `<div class="file">maf/memory_long_term_agent.py · the exact code running this chat</div><pre class="code">${highlight(await res.text())}</pre>
+          <div><button id="ltHide">Hide code</button></div>`;
+        $("ltHide").onclick = closeHood;
+      } catch (err) {
+        hood.textContent = "⚠️ Could not load code: " + err.message;
+      }
+    }
+    root.querySelector(".composer").onsubmit = sendMessage;
+    prompt.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) sendMessage(e); };
+    $("ltLook").onclick = openHood;
+    memory("get").catch(() => {});
+  })();
 </script>
 <script>
   const HUES = ["#a371f7", "#2f81f7", "#3fb950", "#d29922", "#db61a2", "#f85149"];

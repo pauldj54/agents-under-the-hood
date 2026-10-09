@@ -22,6 +22,10 @@ implementation, not yet a standalone browser app.
    stateless (`agent.run(message)`) and one using a session
    (`agent.run(message, session=session)`). Each has a "Look under the hood"
    button that shows its exact code. Requires `ollama pull phi3:3.8b`.
+5. Long-term memory: a chat with a context provider
+   (`maf\memory_long_term_agent.py`) that stores the user's favourite colour,
+   shows the stored value live, keeps it across "New session", and clears it with
+   "Forget me". Uses `ContextProvider` from `agent-framework-core` 1.20.0.
 
 The source lives at the project root deliberately. Copilot discovers project
 extensions under `.github\extensions\`, so this copy does not register a second
