@@ -1,0 +1,8 @@
+agent-framework-core==1.20.0
+agent-framework-foundry==1.14.0
+agent-framework-ollama==1.0.0b261002
+azure-identity>=1.25,<2
+anyio==4.15.1
+httpx==0.28.1
+ollama==0.5.3
+python-dotenv>=1,<2

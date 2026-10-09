@@ -1,0 +1,455 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Agents Under the Hood</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px;
+    background: var(--background-color-default, #0d1117);
+    color: var(--text-color-default, #e6edf3);
+    font-family: var(--font-sans, -apple-system, "Segoe UI", sans-serif);
+    font-size: var(--text-body-medium, 14px);
+    line-height: var(--leading-body-medium, 20px);
+  }
+  header { text-align: center; margin-bottom: 28px; }
+  h1 {
+    margin: 0 0 6px;
+    font-size: var(--text-title-large, 26px);
+    font-weight: var(--font-weight-semibold, 600);
+  }
+  .sub { color: var(--text-color-muted, #8b949e); margin: 0; }
+  .grid {
+    display: grid; gap: 18px; max-width: 980px; margin: 0 auto;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+  .card {
+    position: relative; min-height: 220px; border-radius: 16px; padding: 20px;
+    border: 1px solid var(--border-color-default, #30363d);
+    background: color-mix(in srgb, var(--hue) 10%, var(--background-color-default, #0d1117));
+    cursor: pointer; user-select: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+    transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+  }
+  .card:hover { transform: translateY(-3px); border-color: var(--hue); box-shadow: 0 8px 24px color-mix(in srgb, var(--hue) 25%, transparent); }
+  .card:focus-visible { outline: 2px solid var(--color-focus-outline, #2f81f7); outline-offset: 3px; }
+  .card.flip { animation: flip .35s ease; }
+  @keyframes flip { 0% { transform: rotateY(0) } 50% { transform: rotateY(90deg) } 100% { transform: rotateY(0) } }
+  .stage-dots { position: absolute; top: 12px; right: 14px; display: flex; gap: 5px; }
+  .stage-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--border-color-default, #30363d); }
+  .stage-dots span.on { background: var(--hue); }
+  .letter { font-size: 96px; font-weight: 700; line-height: 1; color: var(--hue); }
+  .hint { margin-top: 14px; color: var(--text-color-muted, #8b949e); font-size: 12px; }
+  .tiles { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  .tile {
+    width: 30px; height: 36px; border-radius: 6px; display: grid; place-items: center;
+    font-family: var(--font-mono, Consolas, monospace); font-weight: 700; font-size: 18px;
+    background: color-mix(in srgb, var(--hue) 22%, transparent); color: var(--hue);
+    animation: pop .3s ease backwards;
+  }
+  @keyframes pop { from { transform: scale(.3); opacity: 0 } }
+  .icon { font-size: 34px; margin-bottom: 6px; }
+  .name { font-size: 20px; font-weight: 600; color: var(--hue); margin-bottom: 8px; }
+  .def { color: var(--text-color-default, #e6edf3); font-size: 13px; line-height: 19px; }
+  .toolbar { text-align: center; margin-top: 26px; }
+  button {
+    font: inherit; padding: 6px 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border-color-default, #30363d);
+    background: transparent; color: var(--text-color-default, #e6edf3);
+  }
+  button:hover:not(:disabled) { border-color: var(--text-color-muted, #8b949e); }
+  button:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* Navigation */
+  .navbar {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 1200px; margin: -20px auto 24px; padding: 10px 0;
+    background: var(--background-color-default, #0d1117);
+  }
+  .navbtn {
+    font: inherit; font-weight: 600; padding: 8px 18px; border-radius: 8px; cursor: pointer;
+    border: 1px solid #a371f7; background: #a371f7; color: #fff;
+  }
+  .navbtn:disabled { background: transparent; color: var(--text-color-muted, #8b949e); border-color: var(--border-color-default, #30363d); opacity: .5; cursor: not-allowed; }
+  #pos { color: var(--text-color-muted, #8b949e); font-size: 12px; }
+  .screen:not(.active) { display: none; }
+
+  /* Harness screen */
+  .definition { max-width: 760px; margin: 0 auto 20px; font-size: 16px; line-height: 26px; text-align: center; }
+  .definition strong { color: #a371f7; }
+  .scene { display: block; width: 100%; max-width: 900px; margin: 0 auto; }
+  .scene text { font-family: var(--font-sans, "Segoe UI", sans-serif); }
+  .scene .lbl { font-size: 19px; font-weight: 600; fill: currentColor; }
+  .strap { stroke: #8b5a2b; stroke-width: 6; fill: none; stroke-linecap: round; }
+  .fit { fill: #d29922; stroke: #7d5a10; stroke-width: 1.5; }
+  .bob { animation: bob .5s ease-in-out infinite alternate; }
+  @keyframes bob { to { transform: translateY(-4px); } }
+  .leg { transform-box: fill-box; transform-origin: top center; animation: swing .5s ease-in-out infinite alternate; }
+  .leg.b { animation-delay: -.5s; }
+  @keyframes swing { from { transform: rotate(18deg); } to { transform: rotate(-18deg); } }
+  .wheel { transform-box: fill-box; transform-origin: center; animation: spin 1.2s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ground { stroke: var(--border-color-default, #30363d); stroke-width: 3; stroke-dasharray: 30 20; animation: road .5s linear infinite; }
+  @keyframes road { to { stroke-dashoffset: 50; } }
+  .llm { animation: glow 1.6s ease-in-out infinite alternate; }
+  @keyframes glow { from { filter: drop-shadow(0 0 2px #a371f7); } to { filter: drop-shadow(0 0 12px #a371f7); } }
+  .tail { transform-box: fill-box; transform-origin: top right; animation: swish .8s ease-in-out infinite alternate; }
+  @keyframes swish { from { transform: rotate(-10deg); } to { transform: rotate(12deg); } }
+
+  /* Screen 3: connect to an LLM */
+  .s3-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 1200px; margin: 0 auto 18px; flex-wrap: wrap; }
+  .s3-head h1 { margin: 0; }
+  .s3-head label { color: var(--text-color-muted, #8b949e); margin-right: 8px; }
+  select {
+    font: inherit; font-size: 15px; padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--border-color-default, #30363d);
+    background: var(--background-color-default, #0d1117); color: var(--text-color-default, #e6edf3);
+  }
+  .s3 { display: grid; grid-template-columns: 3fr 2fr; gap: 18px; max-width: 1200px; margin: 0 auto; height: calc(100vh - 190px); min-height: 460px; }
+  @media (max-width: 860px) { .s3 { grid-template-columns: 1fr; height: auto; } }
+  .panel { border: 1px solid var(--border-color-default, #30363d); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+  .panel-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border-color-default, #30363d); }
+  .panel-head .title { font-weight: 600; }
+  .panel-head .meta { color: var(--text-color-muted, #8b949e); font-size: 12px; }
+  .panel-head .spacer { flex: 1; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: color-mix(in srgb, #3fb950 20%, transparent); color: #3fb950; }
+  .avatar { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: #a371f7; color: #fff; font-weight: 700; font-size: 13px; flex: none; }
+  .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .empty { margin: auto; text-align: center; color: var(--text-color-muted, #8b949e); }
+  .msg { display: flex; gap: 10px; max-width: 85%; }
+  .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+  .msg.user .avatar { background: #2f81f7; }
+  .bubble { padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; font-size: 15px; line-height: 22px;
+    background: color-mix(in srgb, var(--text-color-default, #e6edf3) 6%, transparent); }
+  .msg.user .bubble { background: #2f81f7; color: #fff; }
+  .bubble.typing::after { content: "▍"; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border-color-default, #30363d); }
+  .composer textarea {
+    flex: 1; resize: none; font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 8px; height: 44px;
+    border: 1px solid var(--border-color-default, #30363d); background: transparent; color: inherit;
+  }
+  .hood { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; text-align: center; overflow: auto; min-height: 0; }
+  .hood.open { justify-content: flex-start; align-items: stretch; text-align: left; }
+  .hood-icon { font-size: 54px; }
+  .bigbtn { font-size: 17px; padding: 12px 24px; }
+  pre.code {
+    margin: 0; padding: 14px; border-radius: 8px; overflow: auto; text-align: left; white-space: pre-wrap; word-break: break-word;
+    background: #0b0f17; color: #e6edf3; border: 1px solid #30363d;
+    font-family: var(--font-mono, Consolas, monospace); font-size: 14px; line-height: 21px;
+  }
+  .code .k { color: #ff7b72; } .code .s { color: #a5d6ff; } .code .c { color: #8b949e; font-style: italic; } .code .f { color: #d2a8ff; }
+  .code .hl { background: color-mix(in srgb, #d29922 25%, transparent); border-radius: 3px; }
+  .file { font-family: var(--font-mono, Consolas, monospace); font-size: 12px; color: var(--text-color-muted, #8b949e); }
+</style>
+</head>
+<body>
+  <div class="navbar">
+    <button class="navbtn" id="back">← Back</button>
+    <span id="pos"></span>
+    <button class="navbtn" id="next">Next →</button>
+  </div>
+
+  <section class="screen">
+    <header>
+      <h1>Agents Under the Hood</h1>
+      <p class="sub">Six building blocks power every AI agent. Click a card to uncover it.</p>
+    </header>
+    <div class="grid" id="grid"></div>
+    <div class="toolbar"><button id="reset">Reset</button></div>
+  </section>
+
+  <section class="screen">
+    <header><h1>The Agent Harness</h1></header>
+    <p class="definition">
+      An <strong>agent harness</strong> is all the code around an LLM that turns it into an agent: it runs the loop,
+      builds the context, executes tools, stores state, and enforces limits and permissions. The model decides
+      <em>what</em> to do next, and the harness does everything else. In short: <strong>agent = model + harness</strong>.
+    </p>
+    <svg class="scene" viewBox="60 0 900 340" role="img" aria-label="A horse with an LLM head, harnessed to a cart full of tools">
+      <line class="ground" x1="0" y1="304" x2="820" y2="304" />
+      <g class="bob">
+        <!-- Cart with tools -->
+        <g>
+          <text x="105" y="168" font-size="30">🔧</text>
+          <text x="145" y="162" font-size="30">🔍</text>
+          <text x="185" y="168" font-size="30">💻</text>
+          <text x="225" y="164" font-size="30">🗄️</text>
+          <rect x="90" y="170" width="180" height="70" rx="8" fill="#6e4b2a" stroke="#4a3018" stroke-width="3" />
+          <text x="180" y="212" text-anchor="middle" font-size="18" font-weight="700" fill="#f0e0c8">TOOLS</text>
+          <g class="wheel">
+            <circle cx="180" cy="264" r="38" fill="none" stroke="#4a3018" stroke-width="7" />
+            <line x1="142" y1="264" x2="218" y2="264" stroke="#4a3018" stroke-width="4" />
+            <line x1="180" y1="226" x2="180" y2="302" stroke="#4a3018" stroke-width="4" />
+            <line x1="153" y1="237" x2="207" y2="291" stroke="#4a3018" stroke-width="4" />
+            <line x1="207" y1="237" x2="153" y2="291" stroke="#4a3018" stroke-width="4" />
+            <circle cx="180" cy="264" r="7" class="fit" />
+          </g>
+        </g>
+
+        <!-- Horse -->
+        <g fill="#a0785a">
+          <path class="tail" d="M470 170 q-40 10 -45 70 q25 -30 45 -55 z" fill="#5c3d24" />
+          <g class="leg">  <rect x="488" y="215" width="14" height="85" rx="6" /></g>
+          <g class="leg b"><rect x="512" y="215" width="14" height="85" rx="6" /></g>
+          <g class="leg b"><rect x="610" y="215" width="14" height="85" rx="6" /></g>
+          <g class="leg">  <rect x="634" y="215" width="14" height="85" rx="6" /></g>
+          <ellipse cx="560" cy="190" rx="95" ry="45" />
+          <polygon points="620,160 660,200 715,110 685,92" />
+          <path d="M660 100 q20 -40 45 -10" fill="none" stroke="#5c3d24" stroke-width="10" stroke-linecap="round" />
+        </g>
+        <!-- LLM head -->
+        <g class="llm">
+          <polygon points="700,52 708,30 716,52" fill="#7d55c7" />
+          <rect x="680" y="50" width="100" height="62" rx="20" fill="#a371f7" />
+          <circle cx="698" cy="72" r="5" fill="#fff" /><circle cx="699" cy="72" r="2.5" fill="#1f1235" />
+          <text x="748" y="88" text-anchor="middle" font-size="22" font-weight="800" fill="#fff">LLM</text>
+        </g>
+
+        <!-- Harness straps & fittings -->
+        <path class="strap" d="M716 52 L716 110 M716 104 L778 104" stroke-width="5" /> <!-- bridle -->
+        <path class="strap" d="M716 104 Q470 70 255 168" stroke-width="3" />        <!-- reins -->
+        <ellipse cx="655" cy="148" rx="16" ry="38" transform="rotate(35 655 148)" class="strap" stroke-width="10" stroke="#6b4220" /> <!-- collar -->
+        <path class="strap" d="M640 172 L560 182 L270 205" />                       <!-- traces -->
+        <path class="strap" d="M560 145 L560 235" />                                <!-- girth -->
+        <rect x="540" y="138" width="40" height="14" rx="5" fill="#6b4220" />         <!-- saddle pad -->
+        <path class="strap" d="M478 175 Q470 210 500 228" />                        <!-- breeching -->
+        <circle cx="716" cy="104" r="6" class="fit" />
+        <circle cx="642" cy="168" r="6" class="fit" />
+        <circle cx="560" cy="182" r="6" class="fit" />
+        <circle cx="560" cy="235" r="5" class="fit" />
+        <circle cx="270" cy="205" r="6" class="fit" />
+        <circle cx="255" cy="168" r="5" class="fit" />
+      </g>
+
+      <!-- Labels mapping harness parts to the agent harness -->
+      <text class="lbl" x="730" y="20" text-anchor="middle">LLM: model decides</text>
+      <text class="lbl" x="700" y="215">collar: the loop</text>
+      <text class="lbl" x="370" y="268" text-anchor="middle">traces: tool execution</text>
+      <text class="lbl" x="560" y="124" text-anchor="middle">saddle: state</text>
+      <text class="lbl" x="450" y="74" text-anchor="middle">reins: limits &amp; permissions</text>
+      <text class="lbl" x="792" y="110">bridle: context</text>
+    </svg>
+  </section>
+
+  <section class="screen">
+    <div class="s3-head">
+      <h1>Connecting to an LLM</h1>
+      <div>
+        <label for="model">Model</label>
+        <select id="model">
+          <option value="local">🖥️ phi3:3.8b · Ollama (local)</option>
+          <option value="foundry">☁️ MAI-Thinking-1 · Microsoft Foundry (remote)</option>
+        </select>
+      </div>
+    </div>
+    <div class="s3">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="avatar">AI</div>
+          <div><div class="title" id="agentName">LocalPhi</div><div class="meta" id="agentMeta">Agent · phi3:3.8b via Ollama</div></div>
+          <span class="badge" id="agentBadge">local</span>
+          <span class="spacer"></span>
+          <button id="newChat">New chat</button>
+        </div>
+        <div class="messages" id="messages"><div class="empty">💬 Send a message to start chatting with the agent</div></div>
+        <form class="composer" id="composer">
+          <textarea id="prompt" placeholder="Type a message… (Enter to send)"></textarea>
+          <button class="navbtn" id="send">Send</button>
+        </form>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="title">🔧 Under the hood</span><span class="spacer"></span><span class="meta">Microsoft Agent Framework · Python</span></div>
+        <div class="hood" id="hood">
+          <div class="hood-icon">🚗</div>
+          <p>What code connects this chat to the model?</p>
+          <button class="navbtn bigbtn" id="lookBtn">Look under the hood</button>
+        </div>
+      </div>
+    </div>
+  </section>
+<script>
+  const screens = [...document.querySelectorAll(".screen")];
+  const back = document.getElementById("back"), next = document.getElementById("next");
+  let cur = 0;
+  function show(i) {
+    cur = i;
+    screens.forEach((s, k) => s.classList.toggle("active", k === i));
+    back.disabled = i === 0;
+    next.disabled = i === screens.length - 1;
+    document.getElementById("pos").textContent = `${i + 1} / ${screens.length}`;
+  }
+  back.onclick = () => show(cur - 1);
+  next.onclick = () => show(cur + 1);
+  show(0);
+</script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const MODELS = {
+    local:   { name: "LocalPhi", meta: "Agent · phi3:3.8b via Ollama", badge: "local" },
+    foundry: { name: "FoundryAgent", meta: "Agent · MAI-Thinking-1 via Microsoft Foundry · Entra ID", badge: "remote" },
+  };
+  let busy = false, hoodOpen = false;
+  const histories = { local: "", foundry: "" };
+  let displayedModel = "local";
+
+  function setBusy(value) {
+    busy = value;
+    $("send").disabled = value;
+    $("model").disabled = value;
+    $("newChat").disabled = value;
+  }
+
+  function addMsg(role, text) {
+    $("messages").querySelector(".empty")?.remove();
+    const el = document.createElement("div");
+    el.className = "msg " + role;
+    el.innerHTML = `<div class="avatar">${role === "user" ? "You" : "AI"}</div><div class="bubble"></div>`;
+    el.querySelector(".bubble").textContent = text;
+    $("messages").appendChild(el);
+    $("messages").scrollTop = $("messages").scrollHeight;
+    return el.querySelector(".bubble");
+  }
+
+  async function sendMessage(e) {
+    e.preventDefault();
+    const message = $("prompt").value.trim();
+    if (!message || busy) return;
+    setBusy(true); $("prompt").value = "";
+    addMsg("user", message);
+    const bubble = addMsg("assistant", "");
+    bubble.classList.add("typing");
+    try {
+      const res = await fetch("/api/chat", { method: "POST", body: JSON.stringify({ model: $("model").value, message }) });
+      if (!res.ok) throw new Error(await res.text());
+      const reader = res.body.getReader(), dec = new TextDecoder();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        bubble.textContent += dec.decode(value, { stream: true });
+        $("messages").scrollTop = $("messages").scrollHeight;
+      }
+    } catch (err) {
+      bubble.textContent = "⚠️ " + err.message;
+    }
+    bubble.classList.remove("typing");
+    setBusy(false); $("prompt").focus();
+  }
+
+  function highlight(code) {
+    const esc = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return esc.replace(/(#.*$)|("[^"\n]*")|\b(from|import|async|def|await|for|in|if|return|yield|None|str)\b|\b(OllamaChatClient|FoundryChatClient|AzureCliCredential|Agent|create_session|run|chat)\b/gm,
+      (m, c, s, k, f) => c ? `<span class="c">${c}</span>`
+        : s ? `<span class="s${/localhost|phi3|services.ai.azure.com|MAI-Thinking/.test(s) ? " hl" : ""}">${s}</span>`
+        : k ? `<span class="k">${k}</span>` : `<span class="f">${f}</span>`);
+  }
+
+  async function lookUnderTheHood() {
+    hoodOpen = true;
+    const model = $("model").value;
+    let code;
+    try {
+      const res = await fetch("/api/snippet?model=" + model);
+      if (!res.ok) throw new Error(await res.text());
+      code = await res.text();
+    } catch (err) {
+      $("hood").textContent = "⚠️ Could not load code: " + err.message;
+      return;
+    }
+    if (!hoodOpen || $("model").value !== model) return;
+    const file = `maf/${model === "local" ? "local" : "foundry"}_agent.py · the exact code running this chat`;
+    $("hood").className = "hood open";
+    $("hood").innerHTML = `<div class="file">${file}</div><pre class="code">${highlight(code)}</pre>
+      <div><button id="hideBtn">Hide code</button></div>`;
+    $("hideBtn").onclick = closeHood;
+  }
+
+  function closeHood() {
+    hoodOpen = false;
+    $("hood").className = "hood";
+    $("hood").innerHTML = `<div class="hood-icon">🚗</div><p>What code connects this chat to the model?</p>
+      <button class="navbtn bigbtn" id="lookBtn">Look under the hood</button>`;
+    $("lookBtn").onclick = lookUnderTheHood;
+  }
+
+  $("model").onchange = () => {
+    histories[displayedModel] = $("messages").innerHTML;
+    displayedModel = $("model").value;
+    $("messages").innerHTML = histories[displayedModel] || `<div class="empty">💬 Send a message to start chatting with the agent</div>`;
+    const m = MODELS[$("model").value];
+    $("agentName").textContent = m.name; $("agentMeta").textContent = m.meta; $("agentBadge").textContent = m.badge;
+    if (hoodOpen) lookUnderTheHood();
+  };
+  $("newChat").onclick = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model: $("model").value }) });
+      if (!res.ok) throw new Error(await res.text());
+      const result = await res.json();
+      if (!result.ok) throw new Error(result.error);
+      histories[displayedModel] = "";
+      $("messages").innerHTML = `<div class="empty">💬 Send a message to start chatting with the agent</div>`;
+    } catch (err) {
+      addMsg("assistant", "⚠️ Could not reset chat: " + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  $("composer").onsubmit = sendMessage;
+  $("prompt").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) sendMessage(e); };
+  $("lookBtn").onclick = lookUnderTheHood;
+</script>
+<script>
+  const HUES = ["#a371f7", "#2f81f7", "#3fb950", "#d29922", "#db61a2", "#f85149"];
+  const grid = document.getElementById("grid");
+  let state = null;
+  let prev = {};
+
+  function cardHtml(c, i) {
+    const dots = [0,1,2].map(s => `<span class="${s <= c.stage ? "on" : ""}"></span>`).join("");
+    let body;
+    if (c.stage === 0) {
+      body = `<div class="letter">${c.letter}</div><div class="hint">Click to reveal letters</div>`;
+    } else if (c.stage === 1) {
+      body = `<div class="tiles">${c.scrambled.map((l, k) => `<div class="tile" style="animation-delay:${k*30}ms">${l}</div>`).join("")}</div>
+              <div class="hint">Can you guess it? Click to reveal</div>`;
+    } else {
+      body = `<div class="icon">${c.icon}</div><div class="name">${c.name}</div><div class="def">${c.definition}</div>`;
+    }
+    return `<div class="card" tabindex="0" role="button" data-id="${c.id}" style="--hue:${HUES[i % HUES.length]}">
+      <div class="stage-dots">${dots}</div>${body}</div>`;
+  }
+
+  function render() {
+    grid.innerHTML = state.cards.map(cardHtml).join("");
+    grid.querySelectorAll(".card").forEach(el => {
+      const id = el.dataset.id;
+      const stage = state.cards.find(c => c.id === id).stage;
+      if (prev[id] !== undefined && prev[id] !== stage) el.classList.add("flip");
+      prev[id] = stage;
+    });
+  }
+
+  async function post(path) {
+    const r = await fetch(path, { method: "POST" });
+    state = await r.json(); render();
+  }
+
+  grid.addEventListener("click", e => {
+    const card = e.target.closest(".card");
+    if (card) post("/api/advance/" + card.dataset.id);
+  });
+  grid.addEventListener("keydown", e => {
+    const card = e.target.closest(".card");
+    if (card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); post("/api/advance/" + card.dataset.id); }
+  });
+  document.getElementById("reset").onclick = () => post("/api/reset");
+
+  const es = new EventSource("/events");
+  es.onmessage = e => { state = JSON.parse(e.data); render(); };
+</script>
+</body>
+</html>
