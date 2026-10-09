@@ -26,6 +26,11 @@ implementation, not yet a standalone browser app.
    (`maf\memory_long_term_agent.py`) that stores the user's favourite colour,
    shows the stored value live, keeps it across "New session", and clears it with
    "Forget me". Uses `ContextProvider` from `agent-framework-core` 1.20.0.
+   The provider identifies the latest message's language with the local model
+   and supplies a per-turn language reminder. Known colours are presented as
+   confirmed user preferences, translated into that language, rather than as
+   guesses or the assistant's own preferences. Language detection adds a local
+   model call before each response.
 
 The source lives at the project root deliberately. Copilot discovers project
 extensions under `.github\extensions\`, so this copy does not register a second

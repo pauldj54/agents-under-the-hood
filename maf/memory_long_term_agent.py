@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Any
 
@@ -29,8 +30,50 @@ class FavouriteColourMemory(ContextProvider):
     async def before_run(
         self, *, agent: Any, session: AgentSession, context: SessionContext, state: dict[str, Any]
     ) -> None:
+        latest = next(
+            (msg.text for msg in reversed(context.input_messages) if msg.role == "user" and msg.text),
+            None,
+        )
+        if latest:
+            reply = await self.client.get_response(
+                [
+                    Message("system", [
+                        "Identify the language of the following message. "
+                        "Reply with only the language name in English, such as German, English, or French."
+                    ]),
+                    Message("user", [
+                        f"Classify the language of this text, without answering its question: {json.dumps(latest)}"
+                    ]),
+                ],
+                options={"temperature": 0},
+            )
+            language = (reply.text or "").strip().rstrip(".")
+            if not re.fullmatch(r"[A-Za-z][A-Za-z -]{0,39}", language):
+                raise ValueError(f"Unexpected language detection result: {language!r}")
+            context.extend_instructions(
+                self.source_id,
+                f"The latest user message is in {language}. "
+                f"Write your entire reply in {language}, regardless of previous conversation languages. "
+                "Translate any remembered colour into that language. "
+                "Answer briefly, addressing the user directly. Do not mention being an AI.",
+            )
+            # Phi can follow the previous answer's language despite system instructions.
+            # Repeat the current turn's language after the user input.
+            context.input_messages.append(Message("system", [
+                f"Respond to the user's latest message only in {language}. "
+                "Give a brief, direct answer to what they actually asked. "
+                "Only mention their remembered favourite colour when it is relevant. "
+                "Do not confuse the user's preferences with your own."
+            ]))
         if self.memory.favourite_colour:
-            note = f"The user's favourite colour is {self.memory.favourite_colour}."
+            note = (
+                f"You remember this confirmed fact about the person you are talking to: "
+                f"their favourite colour is {self.memory.favourite_colour}. "
+                "When they ask about their favourite colour, answer confidently and directly, "
+                "addressing them as 'you'. Translate the colour into the language of their latest message. "
+                "Do not hedge, ask them to confirm this fact, or discuss your own preferences. "
+                "For a favourite-colour question, give just one short factual sentence."
+            )
         else:
             note = "The user's favourite colour is unknown. Ask them about it."
         context.extend_instructions(self.source_id, note)
@@ -58,7 +101,16 @@ client = OllamaChatClient(host="http://localhost:11434", model="phi3:3.8b")
 agent = Agent(
     client=client,
     name="MemoryPhi",
-    instructions="You are a friendly assistant.",
+    instructions=(
+        "You are a friendly assistant talking directly to the user. "
+        "Always answer in the same language as the user's latest message, "
+        "even if earlier messages or your instructions use another language. "
+        "Keep replies brief and natural. "
+        "Questions about 'my favourite colour' refer to the user, not to you. "
+        "Use the remembered user preferences as confirmed facts. "
+        "Never add disclaimers about being an AI or not having personal preferences."
+    ),
+    default_options={"temperature": 0},
     context_providers=[FavouriteColourMemory(memory, client)],
 )
 
