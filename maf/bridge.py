@@ -40,6 +40,7 @@ async def handle(req):
             "foundry": "foundry_agent",
             "stateless": "memory_stateless_agent",
             "session": "memory_session_agent",
+            "longterm": "memory_long_term_agent",
         }
         if req.get("model") not in modules:
             raise ValueError("Select a valid model.")
@@ -48,6 +49,11 @@ async def handle(req):
         if req["type"] == "reset":
             if hasattr(selected_agent, "session"):
                 selected_agent.session = selected_agent.agent.create_session()
+        elif req["type"] == "forget":
+            selected_agent.memory.favourite_colour = None
+            selected_agent.session = selected_agent.agent.create_session()
+        elif req["type"] == "memory":
+            send({"id": rid, "delta": selected_agent.memory.model_dump_json()})
         else:
             async for text in selected_agent.chat(req["message"]):
                 send({"id": rid, "delta": text})

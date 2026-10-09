@@ -70,6 +70,7 @@ const SNIPPETS = {
     foundry: "foundry_agent.py",
     stateless: "memory_stateless_agent.py",
     session: "memory_session_agent.py",
+    longterm: "memory_long_term_agent.py",
 };
 
 function freshCards() {
@@ -142,6 +143,14 @@ async function startServer(inst) {
                 const { model } = await readJson(req);
                 const err = await callBridge({ type: "reset", model });
                 return json(res, { ok: !err, error: err });
+            }
+            if (req.method === "POST" && url.pathname === "/api/memory") {
+                const { action } = await readJson(req);
+                let text = "";
+                const err = await callBridge({ type: action === "forget" ? "forget" : "memory", model: "longterm" }, (t) => (text += t));
+                if (err) return json(res, { error: err });
+                if (action === "forget") return json(res, { favourite_colour: null });
+                return json(res, JSON.parse(text));
             }
             if (req.method === "GET" && url.pathname === "/api/snippet") {
                 const file = SNIPPETS[url.searchParams.get("model")];
