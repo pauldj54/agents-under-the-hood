@@ -41,6 +41,7 @@ async def handle(req):
             "stateless": "memory_stateless_agent",
             "session": "memory_session_agent",
             "longterm": "memory_long_term_agent",
+            "calculator": "calculator_agent",
         }
         if req.get("model") not in modules:
             raise ValueError("Select a valid model.")
@@ -55,7 +56,11 @@ async def handle(req):
         elif req["type"] == "memory":
             send({"id": rid, "delta": selected_agent.memory.model_dump_json()})
         else:
-            async for text in selected_agent.chat(req["message"]):
+            stream = (
+                selected_agent.chat(req["message"], lambda event: send({"id": rid, "tool_event": event}))
+                if req["model"] == "calculator" else selected_agent.chat(req["message"])
+            )
+            async for text in stream:
                 send({"id": rid, "delta": text})
         send({"id": rid, "done": True})
     except Exception as exc:  # report every failure back to the UI

@@ -35,6 +35,7 @@ function getBridge() {
             const p = pending.get(msg.id);
             if (!p) continue;
             if (msg.delta) p.onDelta(msg.delta);
+            if (msg.tool_event) p.onTool(msg.tool_event);
             if (msg.done || msg.error) { pending.delete(msg.id); p.resolve(msg.error); }
         }
     });
@@ -49,10 +50,10 @@ function getBridge() {
     return bridge;
 }
 
-function callBridge(req, onDelta = () => {}) {
+function callBridge(req, onDelta = () => {}, onTool = () => {}) {
     return new Promise((resolve) => {
         const id = nextId++;
-        pending.set(id, { onDelta, resolve });
+        pending.set(id, { onDelta, onTool, resolve });
         getBridge().stdin.write(JSON.stringify({ ...req, id }) + "\n");
     });
 }
@@ -71,6 +72,7 @@ const SNIPPETS = {
     stateless: "memory_stateless_agent.py",
     session: "memory_session_agent.py",
     longterm: "memory_long_term_agent.py",
+    calculator: "calculator_agent.py",
 };
 
 function freshCards() {
@@ -139,6 +141,19 @@ async function startServer(inst) {
                 if (err) res.write(`\n⚠️ ${err}`);
                 return res.end();
             }
+            if (req.method === "POST" && url.pathname === "/api/tools/chat") {
+                const { message } = await readJson(req);
+                if (typeof message !== "string" || !message.trim()) {
+                    res.statusCode = 400;
+                    return json(res, { error: "A message is required." });
+                }
+                res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" });
+                const emit = (event) => res.write(JSON.stringify(event) + "\n");
+                const err = await callBridge({ type: "chat", model: "calculator", message },
+                    (text) => emit({ text }), (event) => emit({ tool_event: event }));
+                emit(err ? { error: err } : { done: true });
+                return res.end();
+            }
             if (req.method === "POST" && url.pathname === "/api/chat/reset") {
                 const { model } = await readJson(req);
                 const err = await callBridge({ type: "reset", model });
@@ -156,7 +171,15 @@ async function startServer(inst) {
                 const file = SNIPPETS[url.searchParams.get("model")];
                 res.setHeader("Content-Type", "text/plain; charset=utf-8");
                 if (!file) return res.end("# Microsoft Foundry snippet: coming in the next iteration.");
-                return res.end(await readFile(join(HERE, "maf", file), "utf8"));
+                const code = await readFile(join(HERE, "maf", file), "utf8");
+                const section = url.searchParams.get("section");
+                if (url.searchParams.get("model") === "calculator" && ["binding", "definition"].includes(section)) {
+                    const start = code.indexOf(section === "binding" ? "agent = Agent(" : "def calculate(");
+                    const end = code.indexOf(section === "binding" ? "\nsession =" : "\nagent = Agent(", start);
+                    if (start < 0 || end < 0) throw new Error(`Calculator ${section} snippet was not found.`);
+                    return res.end(code.slice(start, end).trim());
+                }
+                return res.end(code);
             }
             res.statusCode = 404;
             res.end();
