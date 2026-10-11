@@ -158,6 +158,16 @@
   .memval { font-size: 28px; font-weight: 700; margin-top: 4px; color: var(--text-color-muted, #8b949e); transition: color .3s; }
   .memval.known { color: #a371f7; }
   .memval.flash { animation: memflash .8s ease; }
+  #toolTrace { max-height: 260px; overflow: auto; }
+  #toolTrace pre + pre { margin-top: 8px; }
+  .tools-layout { grid-template-columns: 1.4fr 1fr 1fr; }
+  #toolsHood.open { padding: 12px; gap: 12px; overflow: hidden; }
+  .tool-snippet { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+  .tool-snippet pre.code { flex: 1; min-height: 0; overflow: auto; white-space: pre; word-break: normal; }
+  .tool-snippet .file { flex: none; }
+  #toolsHood.open > .hood-controls { flex: none; }
+  @media (max-width: 1100px) { #toolsHood.open { height: 640px; flex: none; } }
+  @media (max-width: 1100px) { .tools-layout { grid-template-columns: 1fr; height: auto; } }
   @keyframes memflash { 0% { transform: scale(1.25); } 100% { transform: scale(1); } }
 </style>
 </head>
@@ -358,6 +368,45 @@
         <div class="hood" id="ltHood">
           <p class="hood-hint">How does the agent remember across sessions?</p>
           <button class="navbtn bigbtn" id="ltLook">Look under the hood</button>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="screen">
+    <div class="s3-head">
+      <h1>Tools: the agent takes action</h1>
+      <span class="sub">Local Llama requests a tool. Agent Framework executes it.</span>
+    </div>
+    <div class="s3 tools-layout">
+      <div class="panel" id="toolsChat">
+        <div class="panel-head">
+          <div class="avatar">AI</div>
+          <div><div class="title">CalculatorLlama</div><div class="meta">llama3.2:1b via Ollama · native tool calling</div></div>
+          <span class="spacer"></span><button id="toolsReset">New chat</button>
+        </div>
+        <div class="messages" id="toolsMessages"><div class="empty">Ask “calculate 2 + 8” and watch the tool run.</div></div>
+        <form class="composer" id="toolsComposer">
+          <textarea id="toolsPrompt" aria-label="Message to calculator agent" placeholder="Try multiply -2.5 by 4"></textarea>
+          <button class="navbtn" id="toolsSend">Send</button>
+        </form>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="title">Available tools</span></div>
+        <div class="memcard">
+          <div class="panel-head"><span class="title">Calculator</span><span class="badge">enabled</span></div>
+          <p>Sum, subtract, multiply, divide. Inputs: a, b, operation.</p>
+          <div id="toolTrace" role="log" aria-live="polite"><p class="sub">No calls yet.</p></div>
+        </div>
+        <div class="memcard">
+          <div class="panel-head"><span class="title">Web search</span><button disabled>Disabled locally</button></div>
+          <p class="sub">Requires a Microsoft Foundry agent with Grounding with Bing Search. Coming in a separate issue.</p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="title">Under the hood</span></div>
+        <div class="hood" id="toolsHood">
+          <p>How is the calculator bound to the agent?</p>
+          <button class="navbtn bigbtn" id="toolsLook">Look under the hood</button>
         </div>
       </div>
     </div>
@@ -583,6 +632,134 @@
   }
   memoryChat(document.getElementById("mem-stateless"), "stateless");
   memoryChat(document.getElementById("mem-session"), "session");
+</script>
+<script>
+  (() => {
+    const messages = $("toolsMessages"), prompt = $("toolsPrompt"), trace = $("toolTrace");
+    const hood = $("toolsHood");
+    function closeHood() {
+      hood.className = "hood";
+      hood.innerHTML = `<p>How is the calculator bound to the agent?</p>
+        <button class="navbtn bigbtn" id="toolsLook">Look under the hood</button>`;
+      $("toolsLook").onclick = openHood;
+    }
+    async function openHood() {
+      $("toolsLook").disabled = true;
+      try {
+        const [binding, definition] = await Promise.all(["binding", "definition"].map(async (section) => {
+          const res = await fetch("/api/snippet?model=calculator&section=" + section);
+          if (!res.ok) throw new Error(await res.text());
+          return res.text();
+        }));
+        hood.className = "hood open";
+        hood.innerHTML = `<div class="tool-snippet">
+            <div class="file">Agent tool binding · maf/calculator_agent.py</div>
+            <pre class="code" tabindex="0" aria-label="Agent tool binding code">${highlight(binding)}</pre>
+          </div>
+          <div class="tool-snippet">
+            <div class="file">Calculator tool definition · maf/calculator_agent.py</div>
+            <pre class="code" tabindex="0" aria-label="Calculator tool definition code">${highlight(definition)}</pre>
+          </div>
+          <div class="hood-controls"><button id="toolsHide">Hide code</button></div>`;
+        $("toolsHide").onclick = closeHood;
+      } catch (err) {
+        closeHood();
+        const error = document.createElement("p");
+        error.textContent = "Could not load code: " + err.message;
+        hood.prepend(error);
+      }
+    }
+    $("toolsLook").onclick = openHood;
+    let busy = false;
+    const setBusy = (value) => {
+      busy = value;
+      $("toolsSend").disabled = value;
+      $("toolsReset").disabled = value;
+    };
+    function add(role, text) {
+      messages.querySelector(".empty")?.remove();
+      const el = document.createElement("div");
+      el.className = "msg " + role;
+      el.innerHTML = `<div class="avatar">${role === "user" ? "You" : "AI"}</div><div class="bubble"></div>`;
+      const bubble = el.querySelector(".bubble");
+      bubble.textContent = text;
+      messages.appendChild(el);
+      messages.scrollTop = messages.scrollHeight;
+      return bubble;
+    }
+    async function send(e) {
+      e.preventDefault();
+      const message = prompt.value.trim();
+      if (!message || busy) return;
+      setBusy(true);
+      prompt.value = "";
+      add("user", message);
+      const bubble = add("assistant", "");
+      bubble.classList.add("typing");
+      trace.replaceChildren();
+      try {
+        const res = await fetch("/api/tools/chat", { method: "POST", body: JSON.stringify({ message }) });
+        if (!res.ok) throw new Error(await res.text());
+        const reader = res.body.getReader(), decoder = new TextDecoder();
+        let buffer = "";
+        function event(line) {
+          const item = JSON.parse(line);
+          if (item.error) {
+            const error = document.createElement("p");
+            error.textContent = "Error: " + item.error;
+            trace.appendChild(error);
+            throw new Error(item.error);
+          }
+          if (item.text) bubble.textContent += item.text;
+          if (item.tool_event) {
+            const pre = document.createElement("pre");
+            pre.className = "code";
+            pre.textContent = JSON.stringify(item.tool_event, null, 2);
+            trace.appendChild(pre);
+          }
+        }
+        for (;;) {
+          const { value, done } = await reader.read();
+          buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+          let nl;
+          while ((nl = buffer.indexOf("\n")) >= 0) {
+            const line = buffer.slice(0, nl);
+            buffer = buffer.slice(nl + 1);
+            if (line.trim()) event(line);
+          }
+          if (done) {
+            if (buffer.trim()) event(buffer);
+            break;
+          }
+        }
+      } catch (err) {
+        bubble.textContent = "⚠️ " + err.message;
+      } finally {
+        bubble.classList.remove("typing");
+        setBusy(false);
+        prompt.focus();
+        messages.scrollTop = messages.scrollHeight;
+      }
+    }
+    $("toolsComposer").onsubmit = send;
+    prompt.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) send(e); };
+    $("toolsReset").onclick = async () => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model: "calculator" }) });
+        if (!res.ok) throw new Error(await res.text());
+        const result = await res.json();
+        if (!result.ok) throw new Error(result.error);
+        messages.replaceChildren();
+        trace.textContent = "No calls yet.";
+      } catch (err) {
+        add("assistant", "⚠️ " + err.message);
+      } finally {
+        setBusy(false);
+      }
+    };
+  })();
 </script>
 <script>
   // Screen 6: long-term memory (favourite colour)

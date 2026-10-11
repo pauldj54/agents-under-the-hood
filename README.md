@@ -7,7 +7,7 @@ implementation, not yet a standalone browser app.
 ## Layout
 
 - `extension.mjs`: Copilot canvas registration and loopback HTTP server.
-- `index.html`: the three-screen UI.
+- `index.html`: the six-screen UI.
 - `components.mjs`: reveal-card content and helpers.
 - `maf\`: Python Agent Framework bridge, local and Foundry agents, the two
   short-term memory demo agents (`memory_stateless_agent.py`,
@@ -31,6 +31,27 @@ implementation, not yet a standalone browser app.
    confirmed user preferences, translated into that language, rather than as
    guesses or the assistant's own preferences. Language detection adds a local
    model call before each response.
+6. Tools: CalculatorLlama chats on the left, with a calculator invocation trace
+   and a disabled Web search card on the right. The calculator supports `sum`,
+   `subtract`, `multiply`, and `divide`, including negative and decimal numbers.
+   Errors such as division by zero are shown in both chat and the tool pane.
+   A third panel on the right reveals the actual `Agent` tool binding above the
+   calculator tool definition via "Look under the hood". Each snippet scrolls
+   independently, including horizontally for long lines.
+   Requires `ollama pull llama3.2:1b`; no cloud credentials
+   are needed. Foundry and Bing-grounded search are not implemented here.
+
+`maf\calculator_agent.py` uses the standard `OllamaChatClient` and an `Agent`
+with `tools=[calculator]`. Llama emits native tool calls; Agent Framework executes
+the registered `@tool` and returns its result to the model for the chat reply.
+There is no JSON planner or tool-call adapter. The installed `phi3:3.8b` and
+`gemma3:4b` models do not advertise tool support, while `llama3.2:1b` does.
+
+Run the calculator tests with the configured virtual environment:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s .\maf -p test_calculator_agent.py
+```
 
 The source lives at the project root deliberately. Copilot discovers project
 extensions under `.github\extensions\`, so this copy does not register a second
