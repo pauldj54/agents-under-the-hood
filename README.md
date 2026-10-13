@@ -7,7 +7,7 @@ implementation, not yet a standalone browser app.
 ## Layout
 
 - `extension.mjs`: Copilot canvas registration and loopback HTTP server.
-- `index.html`: the six-screen UI.
+- `index.html`: the seven-screen UI.
 - `components.mjs`: reveal-card content and helpers.
 - `maf\`: Python Agent Framework bridge, local and Foundry agents, the two
   short-term memory demo agents (`memory_stateless_agent.py`,
@@ -40,6 +40,46 @@ implementation, not yet a standalone browser app.
    independently, including horizontally for long lines.
    Requires `ollama pull llama3.2:1b`; no cloud credentials
    are needed. Foundry and Bing-grounded search are not implemented here.
+7. Tools across runtimes: starts **Local**, with the same calculator and a
+   disabled Web Search tool. Explicitly switch to **Foundry** to use a prompt
+   agent with hosted Web Search and the local calculator in one conversation.
+   The screen has independent conversations for each runtime (and for screen 6),
+   tool events labelled `local` or `server-side`, clickable source citations,
+   and independently scrollable binding/definition snippets.
+   Foundry usage incurs costs; web queries leave Azure compliance/geographic
+   boundaries. Do not enter sensitive information.
+
+### Foundry tools setup (screen 7)
+
+Use an **existing Azure OpenAI model deployment that supports Web Search**
+in your Foundry project, for example a supported `gpt-4.1-mini` deployment.
+The screen 3 default `MAI-Thinking-1` cannot use this Web Search tool.
+No separate Bing resource or project connection is required.
+
+After configuring the endpoint/tenant in `maf\.env` and signing in with
+`az login`, explicitly create a prompt-agent version:
+
+```powershell
+.\.venv\Scripts\python.exe .\maf\setup_foundry_tools.py --model <existing-deployment-name>
+```
+
+This creates a version of `agents-under-the-hood-tools` with both tool schemas;
+it does not deploy a model or alter `.env`. Add the printed
+`FOUNDRY_TOOLS_AGENT_NAME` and `FOUNDRY_TOOLS_AGENT_VERSION` to `maf\.env`
+and reload the extension. Rerunning setup deliberately creates a new version.
+Missing settings and service/authentication failures are shown in the chat,
+never silently replaced with a local response.
+
+`maf\foundry_tools_agent.py` uses the SDK's native `FoundryAgent` wrapper for
+a saved prompt-agent reference, rather than the deployment-only
+`FoundryChatClient` used on screen 3. The prompt definition binds hosted Web
+Search and the calculator schema; `tools=[calculator]` on the local wrapper
+registers its implementation. MAF handles function calls and submits results
+to Foundry without exposing localhost or deploying the Python function.
+Web-search events/citations are forwarded from actual SDK stream contents;
+the UI does not fabricate search activity. The pinned SDK supports this mixed
+tool configuration and native function dispatch; automated tests exercise
+the dispatch with simulated service responses, not live search.
 
 `maf\calculator_agent.py` uses the standard `OllamaChatClient` and an `Agent`
 with `tools=[calculator]`. Llama emits native tool calls; Agent Framework executes
@@ -50,14 +90,17 @@ There is no JSON planner or tool-call adapter. The installed `phi3:3.8b` and
 Run the calculator tests with the configured virtual environment:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s .\maf -p test_calculator_agent.py
+.\.venv\Scripts\python.exe -m unittest discover -s .\maf -p "test_*agent.py"
 ```
 
 The source lives at the project root deliberately. Copilot discovers project
 extensions under `.github\extensions\`, so this copy does not register a second
 provider. The existing installation at
-`C:\Users\pauld\.copilot\extensions\agents-under-the-hood` remains untouched and
-continues serving the current canvas. Changes here do not update that installation.
+`C:\Users\pauld\.copilot\extensions\agents-under-the-hood`
+serves its installed snapshot. Editing source here does not update it automatically;
+to test changes, explicitly copy the updated source and Python modules there,
+preserve its `.venv` and private `maf\.env`, then reload extensions and reopen
+the canvas.
 
 ## Setup (Windows PowerShell)
 

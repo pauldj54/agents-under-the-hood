@@ -73,6 +73,8 @@ const SNIPPETS = {
     session: "memory_session_agent.py",
     longterm: "memory_long_term_agent.py",
     calculator: "calculator_agent.py",
+    "tools-local": "calculator_agent.py",
+    "tools-foundry": "foundry_tools_agent.py",
 };
 
 function freshCards() {
@@ -142,14 +144,18 @@ async function startServer(inst) {
                 return res.end();
             }
             if (req.method === "POST" && url.pathname === "/api/tools/chat") {
-                const { message } = await readJson(req);
+                const { message, model = "calculator" } = await readJson(req);
+                if (!["calculator", "tools-local", "tools-foundry"].includes(model)) {
+                    res.statusCode = 400;
+                    return json(res, { error: "Select a valid tools runtime." });
+                }
                 if (typeof message !== "string" || !message.trim()) {
                     res.statusCode = 400;
                     return json(res, { error: "A message is required." });
                 }
                 res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" });
                 const emit = (event) => res.write(JSON.stringify(event) + "\n");
-                const err = await callBridge({ type: "chat", model: "calculator", message },
+                const err = await callBridge({ type: "chat", model, message },
                     (text) => emit({ text }), (event) => emit({ tool_event: event }));
                 emit(err ? { error: err } : { done: true });
                 return res.end();
@@ -173,7 +179,20 @@ async function startServer(inst) {
                 if (!file) return res.end("# Microsoft Foundry snippet: coming in the next iteration.");
                 const code = await readFile(join(HERE, "maf", file), "utf8");
                 const section = url.searchParams.get("section");
-                if (url.searchParams.get("model") === "calculator" && ["binding", "definition"].includes(section)) {
+                if (url.searchParams.get("model") === "tools-foundry" && ["binding", "definition"].includes(section)) {
+                    const start = code.indexOf("def prompt_definition(");
+                    const end = code.indexOf("\nagent:", start);
+                    if (start < 0 || end < 0) throw new Error("Foundry tool binding snippet was not found.");
+                    if (section === "binding") return res.end(code.slice(start, end).trim());
+                    const calculator = await readFile(join(HERE, "maf", "calculator_agent.py"), "utf8");
+                    return res.end(
+                        "# Web search is a hosted Foundry tool; there is no local search function.\n"
+                        + code.slice(start, code.indexOf("\ndef create_agent(", start)).trim()
+                        + "\n\n# Calculator implementation runs locally:\n"
+                        + calculator.slice(calculator.indexOf("def calculate("), calculator.indexOf("\nagent = Agent(")).trim()
+                    );
+                }
+                if (["calculator", "tools-local"].includes(url.searchParams.get("model")) && ["binding", "definition"].includes(section)) {
                     const start = code.indexOf(section === "binding" ? "agent = Agent(" : "def calculate(");
                     const end = code.indexOf(section === "binding" ? "\nsession =" : "\nagent = Agent(", start);
                     if (start < 0 || end < 0) throw new Error(`Calculator ${section} snippet was not found.`);

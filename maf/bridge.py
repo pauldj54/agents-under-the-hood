@@ -42,13 +42,17 @@ async def handle(req):
             "session": "memory_session_agent",
             "longterm": "memory_long_term_agent",
             "calculator": "calculator_agent",
+            "tools-local": "local_tools_agent",
+            "tools-foundry": "foundry_tools_agent",
         }
         if req.get("model") not in modules:
             raise ValueError("Select a valid model.")
         selected_agent = importlib.import_module(modules[req["model"]])
 
         if req["type"] == "reset":
-            if hasattr(selected_agent, "session"):
+            if hasattr(selected_agent, "reset"):
+                selected_agent.reset()
+            elif hasattr(selected_agent, "session"):
                 selected_agent.session = selected_agent.agent.create_session()
         elif req["type"] == "forget":
             selected_agent.memory.favourite_colour = None
@@ -58,7 +62,8 @@ async def handle(req):
         else:
             stream = (
                 selected_agent.chat(req["message"], lambda event: send({"id": rid, "tool_event": event}))
-                if req["model"] == "calculator" else selected_agent.chat(req["message"])
+                if req["model"] in ("calculator", "tools-local", "tools-foundry")
+                else selected_agent.chat(req["message"])
             )
             async for text in stream:
                 send({"id": rid, "delta": text})
