@@ -158,15 +158,19 @@
   .memval { font-size: 28px; font-weight: 700; margin-top: 4px; color: var(--text-color-muted, #8b949e); transition: color .3s; }
   .memval.known { color: #a371f7; }
   .memval.flash { animation: memflash .8s ease; }
-  #toolTrace { max-height: 260px; overflow: auto; }
-  #toolTrace pre + pre { margin-top: 8px; }
+  #toolTrace, #cloudTrace { max-height: 260px; overflow: auto; }
+  #toolTrace pre + pre, #cloudTrace pre + pre { margin-top: 8px; }
+  .tools-pane { overflow: auto; padding-bottom: 16px; }
+  .tool-event { font-size: 12px; color: var(--text-color-muted, #8b949e); padding: 6px 12px; }
+  .sources { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+  .sources a { color: #79c0ff; }
   .tools-layout { grid-template-columns: 1.4fr 1fr 1fr; }
-  #toolsHood.open { padding: 12px; gap: 12px; overflow: hidden; }
+  #toolsHood.open, #cloudHood.open { padding: 12px; gap: 12px; overflow: hidden; }
   .tool-snippet { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
   .tool-snippet pre.code { flex: 1; min-height: 0; overflow: auto; white-space: pre; word-break: normal; }
   .tool-snippet .file { flex: none; }
-  #toolsHood.open > .hood-controls { flex: none; }
-  @media (max-width: 1100px) { #toolsHood.open { height: 640px; flex: none; } }
+  #toolsHood.open > .hood-controls, #cloudHood.open > .hood-controls { flex: none; }
+  @media (max-width: 1100px) { #toolsHood.open, #cloudHood.open { height: 640px; flex: none; } }
   @media (max-width: 1100px) { .tools-layout { grid-template-columns: 1fr; height: auto; } }
   @keyframes memflash { 0% { transform: scale(1.25); } 100% { transform: scale(1); } }
 </style>
@@ -399,7 +403,7 @@
         </div>
         <div class="memcard">
           <div class="panel-head"><span class="title">Web search</span><button disabled>Disabled locally</button></div>
-          <p class="sub">Requires a Microsoft Foundry agent with Grounding with Bing Search. Coming in a separate issue.</p>
+          <p class="sub">Requires Microsoft Foundry. Continue to the next screen to combine local tools with hosted web search.</p>
         </div>
       </div>
       <div class="panel">
@@ -407,6 +411,51 @@
         <div class="hood" id="toolsHood">
           <p>How is the calculator bound to the agent?</p>
           <button class="navbtn bigbtn" id="toolsLook">Look under the hood</button>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="screen">
+    <div class="s3-head">
+      <h1>Tools: from local to Foundry</h1>
+      <label>Runtime
+        <select id="cloudRuntime" aria-label="Tools runtime">
+          <option value="tools-local">Local · Llama via Ollama</option>
+          <option value="tools-foundry">Foundry · prompt agent</option>
+        </select>
+      </label>
+    </div>
+    <div class="s3 tools-layout">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="avatar">AI</div>
+          <div><div class="title" id="cloudTitle">CalculatorLlama</div><div class="meta" id="cloudMeta">llama3.2:1b via Ollama · native tool calling</div></div>
+          <span class="spacer"></span><button id="cloudReset">New chat</button>
+        </div>
+        <div class="messages" id="cloudMessages"><div class="empty">Start locally with “calculate 2 + 8”. Switch to Foundry to add web search. Each runtime has its own conversation.</div></div>
+        <form class="composer" id="cloudComposer">
+          <textarea id="cloudPrompt" aria-label="Message to tools agent" placeholder="Calculate 2 + 8"></textarea>
+          <button class="navbtn" id="cloudSend">Send</button>
+        </form>
+      </div>
+      <div class="panel tools-pane">
+        <div class="panel-head"><span class="title">Where tools run</span></div>
+        <div class="memcard">
+          <div class="panel-head"><span class="title">Calculator</span><span class="badge">local · enabled</span></div>
+          <p>The same Python function runs here, even when the model is in Foundry. MAF returns the result to the model.</p>
+        </div>
+        <div class="memcard">
+          <div class="panel-head"><span class="title">Web search</span><span class="badge" id="cloudWebStatus">Disabled locally</span></div>
+          <p class="sub" id="cloudWebHint">Switch explicitly to Foundry to use its server-side Web Search tool, grounded by Bing.</p>
+          <p class="sub">Foundry usage incurs costs. Search queries leave the Azure compliance and geographic boundary. Do not enter sensitive data.</p>
+        </div>
+        <div class="memcard"><div class="title">Tool activity</div><div id="cloudTrace" role="log" aria-live="polite"><p class="sub">No calls yet.</p></div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="title">Under the hood</span></div>
+        <div class="hood" id="cloudHood">
+          <p>Where are the tools bound, and where do they execute?</p>
+          <button class="navbtn bigbtn" id="cloudLook">Look under the hood</button>
         </div>
       </div>
     </div>
@@ -634,35 +683,42 @@
   memoryChat(document.getElementById("mem-session"), "session");
 </script>
 <script>
-  (() => {
-    const messages = $("toolsMessages"), prompt = $("toolsPrompt"), trace = $("toolTrace");
+  function toolsChat(prefix, traceId, runtime = null) {
+    const $ = (id) => document.getElementById(id.replace(/^tools/, prefix));
+    const model = () => runtime ? runtime.value : "calculator";
+    const states = new Map();
+    let displayed = model();
+    const messages = $("toolsMessages"), prompt = $("toolsPrompt"), trace = document.getElementById(traceId);
     const hood = $("toolsHood");
     function closeHood() {
       hood.className = "hood";
-      hood.innerHTML = `<p>How is the calculator bound to the agent?</p>
-        <button class="navbtn bigbtn" id="toolsLook">Look under the hood</button>`;
+      hood.innerHTML = `<p>${runtime ? "Where are the tools bound, and where do they execute?" : "How is the calculator bound to the agent?"}</p>
+        <button class="navbtn bigbtn" id="${prefix}Look">Look under the hood</button>`;
       $("toolsLook").onclick = openHood;
     }
     async function openHood() {
+      const selected = model();
       $("toolsLook").disabled = true;
       try {
         const [binding, definition] = await Promise.all(["binding", "definition"].map(async (section) => {
-          const res = await fetch("/api/snippet?model=calculator&section=" + section);
+          const res = await fetch("/api/snippet?model=" + selected + "&section=" + section);
           if (!res.ok) throw new Error(await res.text());
           return res.text();
         }));
+        if (selected !== model()) return;
         hood.className = "hood open";
         hood.innerHTML = `<div class="tool-snippet">
-            <div class="file">Agent tool binding · maf/calculator_agent.py</div>
+            <div class="file">Agent tool binding · ${model() === "tools-foundry" ? "maf/foundry_tools_agent.py" : "maf/calculator_agent.py"}</div>
             <pre class="code" tabindex="0" aria-label="Agent tool binding code">${highlight(binding)}</pre>
           </div>
           <div class="tool-snippet">
-            <div class="file">Calculator tool definition · maf/calculator_agent.py</div>
-            <pre class="code" tabindex="0" aria-label="Calculator tool definition code">${highlight(definition)}</pre>
+            <div class="file">${model() === "tools-foundry" ? "Hosted web search schema + local calculator" : "Calculator tool definition · maf/calculator_agent.py"}</div>
+            <pre class="code" tabindex="0" aria-label="Tool definition code">${highlight(definition)}</pre>
           </div>
-          <div class="hood-controls"><button id="toolsHide">Hide code</button></div>`;
+          <div class="hood-controls"><button id="${prefix}Hide">Hide code</button></div>`;
         $("toolsHide").onclick = closeHood;
       } catch (err) {
+        if (selected !== model()) return;
         closeHood();
         const error = document.createElement("p");
         error.textContent = "Could not load code: " + err.message;
@@ -675,6 +731,7 @@
       busy = value;
       $("toolsSend").disabled = value;
       $("toolsReset").disabled = value;
+      if (runtime) runtime.disabled = value;
     };
     function add(role, text) {
       messages.querySelector(".empty")?.remove();
@@ -695,10 +752,12 @@
       prompt.value = "";
       add("user", message);
       const bubble = add("assistant", "");
+      const reply = document.createElement("span");
+      bubble.appendChild(reply);
       bubble.classList.add("typing");
       trace.replaceChildren();
       try {
-        const res = await fetch("/api/tools/chat", { method: "POST", body: JSON.stringify({ message }) });
+        const res = await fetch("/api/tools/chat", { method: "POST", body: JSON.stringify({ message, model: model() }) });
         if (!res.ok) throw new Error(await res.text());
         const reader = res.body.getReader(), decoder = new TextDecoder();
         let buffer = "";
@@ -710,12 +769,36 @@
             trace.appendChild(error);
             throw new Error(item.error);
           }
-          if (item.text) bubble.textContent += item.text;
+          if (item.text) reply.textContent += item.text;
           if (item.tool_event) {
+            const tool = item.tool_event;
             const pre = document.createElement("pre");
             pre.className = "code";
-            pre.textContent = JSON.stringify(item.tool_event, null, 2);
+            pre.textContent = JSON.stringify(tool, null, 2);
             trace.appendChild(pre);
+            if (runtime && tool.status !== "citation") {
+              const log = document.createElement("div");
+              log.className = "tool-event";
+              log.textContent = `${tool.tool} · ${tool.execution} · ${tool.status}`;
+              bubble.parentElement.before(log);
+            }
+            if (runtime && tool.status === "citation") {
+              const url = new URL(tool.url);
+              if (["https:", "http:"].includes(url.protocol)) {
+                let sources = bubble.parentElement.querySelector(".sources");
+                if (!sources) {
+                  sources = document.createElement("div");
+                  sources.className = "sources";
+                  bubble.appendChild(sources);
+                }
+                const link = document.createElement("a");
+                link.href = url.href;
+                link.textContent = tool.title;
+                link.target = "_blank";
+                link.rel = "noopener noreferrer";
+                sources.appendChild(link);
+              }
+            }
           }
         }
         for (;;) {
@@ -747,7 +830,7 @@
       if (busy) return;
       setBusy(true);
       try {
-        const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model: "calculator" }) });
+        const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model: model() }) });
         if (!res.ok) throw new Error(await res.text());
         const result = await res.json();
         if (!result.ok) throw new Error(result.error);
@@ -759,7 +842,27 @@
         setBusy(false);
       }
     };
-  })();
+    if (runtime) runtime.onchange = () => {
+      states.set(displayed, { messages: [...messages.childNodes], trace: [...trace.childNodes] });
+      displayed = model();
+      const state = states.get(displayed);
+      messages.replaceChildren(...(state?.messages || []));
+      trace.replaceChildren(...(state?.trace || []));
+      if (!state) {
+        messages.innerHTML = '<div class="empty">A separate conversation for this runtime. Ask for arithmetic or, in Foundry, current web information.</div>';
+        trace.textContent = "No calls yet.";
+      }
+      const cloud = displayed === "tools-foundry";
+      $("toolsTitle").textContent = cloud ? "FoundryToolsAgent" : "CalculatorLlama";
+      $("toolsMeta").textContent = cloud ? "Foundry prompt agent · web search in cloud, calculator here" : "llama3.2:1b via Ollama · native tool calling";
+      $("toolsWebStatus").textContent = cloud ? "server-side · available with setup" : "Disabled locally";
+      $("toolsWebHint").textContent = cloud ? "Requires an Azure OpenAI deployment and configured prompt agent. Search sources appear as links in the reply." : "Switch explicitly to Foundry to use its server-side Web Search tool, grounded by Bing.";
+      prompt.placeholder = cloud ? "Search for recent AI news, then calculate 2 + 8" : "Calculate 2 + 8";
+      closeHood();
+    };
+  }
+  toolsChat("tools", "toolTrace");
+  toolsChat("cloud", "cloudTrace", document.getElementById("cloudRuntime"));
 </script>
 <script>
   // Screen 6: long-term memory (favourite colour)
