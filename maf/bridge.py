@@ -9,6 +9,7 @@ The "foundry" model uses MAI-Thinking-1 with the Azure CLI's Entra sign-in.
 Configure AZURE_TENANT_ID and FOUNDRY_PROJECT_ENDPOINT in maf/.env,
 then sign in with az login --tenant <your-tenant-id>.
 FOUNDRY_MODEL_DEPLOYMENT_NAME optionally overrides the model deployment.
+OLLAMA_MODEL configures local chat and memory; OLLAMA_TOOLS_MODEL configures tools.
 Existing environment variables take precedence over .env values.
 Both model sessions reset on bridge restart.
 """
@@ -16,6 +17,7 @@ Both model sessions reset on bridge restart.
 import asyncio
 import importlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -35,6 +37,14 @@ def send(obj):
 async def handle(req):
     rid = req.get("id")
     try:
+        if req["type"] == "models":
+            send({"id": rid, "delta": json.dumps({
+                "local": os.getenv("OLLAMA_MODEL", "phi3:3.8b"),
+                "foundry": os.getenv("FOUNDRY_MODEL_DEPLOYMENT_NAME", "MAI-Thinking-1"),
+                "tools": os.getenv("OLLAMA_TOOLS_MODEL", "llama3.2:1b"),
+            })})
+            send({"id": rid, "done": True})
+            return
         modules = {
             "local": "local_agent",
             "foundry": "foundry_agent",

@@ -165,6 +165,16 @@ async function startServer(inst) {
                 const err = await callBridge({ type: "reset", model });
                 return json(res, { ok: !err, error: err });
             }
+            if (req.method === "GET" && url.pathname === "/api/models") {
+                let text = "";
+                const err = await callBridge({ type: "models" }, (t) => (text += t));
+                if (err) {
+                    res.statusCode = 500;
+                    return json(res, { error: err });
+                }
+                res.setHeader("Cache-Control", "no-store");
+                return json(res, JSON.parse(text));
+            }
             if (req.method === "POST" && url.pathname === "/api/memory") {
                 const { action } = await readJson(req);
                 let text = "";

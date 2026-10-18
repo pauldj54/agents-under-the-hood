@@ -63,6 +63,9 @@ After configuring the endpoint/tenant in `maf\.env` and signing in with
 .\.venv\Scripts\python.exe .\maf\setup_foundry_tools.py --model <existing-deployment-name>
 ```
 
+Alternatively, set `FOUNDRY_TOOLS_MODEL_DEPLOYMENT_NAME` in `maf\.env` and
+run the command without `--model`. An explicit `--model` takes precedence.
+
 This creates a version of `agents-under-the-hood-tools` with both tool schemas;
 it does not deploy a model or alter `.env`. Add the printed
 `FOUNDRY_TOOLS_AGENT_NAME` and `FOUNDRY_TOOLS_AGENT_VERSION` to `maf\.env`
@@ -87,10 +90,10 @@ the registered `@tool` and returns its result to the model for the chat reply.
 There is no JSON planner or tool-call adapter. The installed `phi3:3.8b` and
 `gemma3:4b` models do not advertise tool support, while `llama3.2:1b` does.
 
-Run the calculator tests with the configured virtual environment:
+Run the agent and model-configuration tests with the configured virtual environment:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s .\maf -p "test_*agent.py"
+.\.venv\Scripts\python.exe -m unittest discover -s .\maf -p "test_*.py"
 ```
 
 The source lives at the project root deliberately. Copilot discovers project
@@ -128,6 +131,23 @@ For Foundry chat, set `AZURE_TENANT_ID` and `FOUNDRY_PROJECT_ENDPOINT` in
 `maf\.env`, then run `az login --tenant <your-tenant-id>`. The default deployment
 is `MAI-Thinking-1`; `FOUNDRY_MODEL_DEPLOYMENT_NAME` can override it. Existing
 environment variables take precedence over `.env` values.
+
+Model names can be edited in `maf\.env`:
+
+| Variable | Default | Used by |
+|---|---|---|
+| `FOUNDRY_MODEL_DEPLOYMENT_NAME` | `MAI-Thinking-1` | Foundry chat |
+| `OLLAMA_MODEL` | `phi3:3.8b` | Local chat and all memory demos |
+| `OLLAMA_TOOLS_MODEL` | `llama3.2:1b` | Local calculator and tools demos |
+| `FOUNDRY_TOOLS_MODEL_DEPLOYMENT_NAME` | None; supply an existing Azure OpenAI deployment | Foundry tools setup |
+
+Pull any newly selected local model with `ollama pull <model-name>`.
+Restart the Python bridge (reload the extension) after changing chat models.
+For Foundry tools, changing the model setting alone does not modify an existing
+saved agent: rerun `setup_foundry_tools.py`, update
+`FOUNDRY_TOOLS_AGENT_VERSION` to the printed version, then reload.
+These settings apply to the copy of `maf\.env` beside the running bridge;
+the separately installed extension does not read this repository's `.env`.
 
 ## Run
 

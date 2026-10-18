@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from typing import Any
 
@@ -95,7 +96,10 @@ class FavouriteColourMemory(ContextProvider):
 
 memory = UserMemory()
 
-client = OllamaChatClient(host="http://localhost:11434", model="phi3:3.8b")
+client = OllamaChatClient(
+    host="http://localhost:11434",
+    model=os.getenv("OLLAMA_MODEL", "phi3:3.8b"),
+)
 
 # 3. Attach the provider to the agent
 agent = Agent(
