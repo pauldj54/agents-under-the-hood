@@ -170,6 +170,17 @@
   .tool-snippet pre.code { flex: 1; min-height: 0; overflow: auto; white-space: pre; word-break: normal; }
   .tool-snippet .file { flex: none; }
   #toolsHood.open > .hood-controls, #cloudHood.open > .hood-controls { flex: none; }
+  .incident-layout { grid-template-columns: 1.25fr 1fr; }
+  .incident-layout .panel-head select { margin-left: auto; }
+  .incident-side { overflow: auto; padding-bottom: 16px; }
+  .incident-side .memcard { margin-top: 12px; }
+  .incident-trace { max-height: 300px; overflow: auto; }
+  .incident-trace pre { margin: 8px 0; padding: 10px; border-radius: 8px; background: #0b0f17; color: #e6edf3; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .incident-skill-source { display: none; margin: 10px 16px 0; }
+  .incident-skill-source.open { display: block; }
+  .incident-skill-source pre { max-height: 240px; overflow: auto; white-space: pre-wrap; }
+  .incident-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  @media (max-width: 860px) { .incident-layout { grid-template-columns: 1fr; } }
   @media (max-width: 1100px) { #toolsHood.open, #cloudHood.open { height: 640px; flex: none; } }
   @media (max-width: 1100px) { .tools-layout { grid-template-columns: 1fr; height: auto; } }
   @keyframes memflash { 0% { transform: scale(1.25); } 100% { transform: scale(1); } }
@@ -456,6 +467,54 @@
         <div class="hood" id="cloudHood">
           <p>Where are the tools bound, and where do they execute?</p>
           <button class="navbtn bigbtn" id="cloudLook">Look under the hood</button>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="screen">
+    <div class="s3-head">
+      <div>
+        <h1>Skills: evidence-first incident triage</h1>
+        <p class="sub">Watch the selector load reusable instructions, then compare with the same local model without the skill.</p>
+      </div>
+      <label>Run mode
+        <select id="incidentMode" aria-label="Incident demo mode">
+          <option value="skill">Skill available</option>
+          <option value="baseline">Baseline · skill unavailable</option>
+        </select>
+      </label>
+    </div>
+    <div class="s3 incident-layout">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="avatar">AI</div>
+          <div><div class="title">Incident triage agent</div><div class="meta" id="incidentModel">Configured local model · Ollama</div></div>
+          <span class="spacer"></span><button id="incidentReset">New chat</button>
+        </div>
+        <div class="messages" id="incidentMessages" aria-live="polite">
+          <div class="empty">Run the sample conversation, or ask your own incident question. No cloud services or credentials are used.</div>
+        </div>
+        <form class="composer" id="incidentComposer">
+          <textarea id="incidentPrompt" aria-label="Message to incident triage agent" placeholder="Describe an incident or ask what to investigate next"></textarea>
+          <button class="navbtn" id="incidentSend">Send</button>
+        </form>
+        <div class="incident-actions" style="padding: 10px 12px">
+          <button class="navbtn" id="incidentSample">Run sample conversation</button>
+        </div>
+      </div>
+      <div class="panel incident-side">
+        <div class="panel-head"><span class="title">Skill selection trace</span></div>
+        <div class="memcard">
+          <div class="title">Discoverable skill</div>
+          <p><code>incident-triage</code></p>
+          <p class="sub">Analyze incident reports, errors, and logs to distinguish evidence from hypotheses and recommend safe diagnostic steps.</p>
+          <p class="sub">This demo uses a transparent keyword selector so selection is reproducible; it is not hidden chain-of-thought.</p>
+          <button id="incidentSkillSourceButton">Show actual SKILL.md</button>
+          <div class="incident-skill-source" id="incidentSkillSource"></div>
+        </div>
+        <div class="memcard">
+          <div class="title">Observable execution events</div>
+          <div class="incident-trace" id="incidentTrace" role="log" aria-live="polite"><p class="sub">No requests yet. Run the sample to see selection and loading events.</p></div>
         </div>
       </div>
     </div>
@@ -893,6 +952,213 @@
   }
   toolsChat("tools", "toolTrace");
   toolsChat("cloud", "cloudTrace", document.getElementById("cloudRuntime"));
+</script>
+<script>
+  (function () {
+    const mode = document.getElementById("incidentMode");
+    const messages = document.getElementById("incidentMessages");
+    const prompt = document.getElementById("incidentPrompt");
+    const trace = document.getElementById("incidentTrace");
+    const sendButton = document.getElementById("incidentSend");
+    const resetButton = document.getElementById("incidentReset");
+    const sampleButton = document.getElementById("incidentSample");
+    const states = new Map();
+    let displayed = mode.value;
+    let busy = false;
+
+    const sampleTurns = [
+      "Our checkout service has been unreliable since this morning's release. Help me investigate, but don't change anything.",
+      "At 10:02 we deployed version 2.8. At 10:05, HTTP 500s rose from 0.2% to 12%. Logs include “database connection timeout.” Database CPU stayed at 35%. Restarting one instance helped for two minutes. What’s happening, and what should we check next?",
+    ];
+
+    function addMessage(role, text) {
+      messages.querySelector(".empty")?.remove();
+      const item = document.createElement("div");
+      item.className = "msg " + role;
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = role === "user" ? "You" : "AI";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = text;
+      item.append(avatar, bubble);
+      messages.appendChild(item);
+      messages.scrollTop = messages.scrollHeight;
+      return bubble;
+    }
+
+    function addTrace(event) {
+      trace.querySelector(".sub")?.remove();
+      const block = document.createElement("pre");
+      block.textContent = JSON.stringify(event, null, 2);
+      trace.appendChild(block);
+      trace.scrollTop = trace.scrollHeight;
+    }
+
+    function saveState(key) {
+      states.set(key, {
+        messages: [...messages.childNodes],
+        trace: [...trace.childNodes],
+      });
+    }
+
+    function restoreState(key) {
+      const state = states.get(key);
+      messages.replaceChildren(...(state?.messages || []));
+      trace.replaceChildren(...(state?.trace || []));
+      if (!state) {
+        messages.innerHTML = '<div class="empty">A separate conversation for this mode. Run the sample to compare skill behavior.</div>';
+        trace.innerHTML = '<p class="sub">No requests yet.</p>';
+      }
+    }
+
+    function setBusy(value) {
+      busy = value;
+      mode.disabled = value;
+      prompt.disabled = value;
+      sendButton.disabled = value;
+      resetButton.disabled = value;
+      sampleButton.disabled = value;
+    }
+
+    async function runTurn(message) {
+      addMessage("user", message);
+      const bubble = addMessage("assistant", "");
+      bubble.classList.add("typing");
+      try {
+        const response = await fetch("/api/skills/chat", {
+          method: "POST",
+          body: JSON.stringify({ message, mode: mode.value }),
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        function handleLine(line) {
+          const event = JSON.parse(line);
+          if (event.error) throw new Error(event.error);
+          if (event.text) bubble.textContent += event.text;
+          if (event.tool_event) addTrace(event.tool_event);
+        }
+        for (;;) {
+          const { value, done } = await reader.read();
+          buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+          let newline;
+          while ((newline = buffer.indexOf("\n")) >= 0) {
+            const line = buffer.slice(0, newline);
+            buffer = buffer.slice(newline + 1);
+            if (line.trim()) handleLine(line);
+          }
+          if (done) {
+            if (buffer.trim()) handleLine(buffer);
+            break;
+          }
+        }
+      } catch (error) {
+        bubble.textContent = "⚠️ " + error.message;
+      } finally {
+        bubble.classList.remove("typing");
+        messages.scrollTop = messages.scrollHeight;
+      }
+    }
+
+    async function submit(e) {
+      e?.preventDefault();
+      const message = prompt.value.trim();
+      if (!message || busy) return;
+      prompt.value = "";
+      setBusy(true);
+      try {
+        await runTurn(message);
+      } finally {
+        saveState(mode.value);
+        setBusy(false);
+        prompt.focus();
+      }
+    }
+
+    document.getElementById("incidentComposer").onsubmit = submit;
+    prompt.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) submit(e); };
+    mode.onchange = () => {
+      saveState(displayed);
+      displayed = mode.value;
+      restoreState(displayed);
+    };
+
+    resetButton.onclick = async () => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        const response = await fetch("/api/skills/reset", {
+          method: "POST",
+          body: JSON.stringify({ mode: mode.value }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || "Could not reset the conversation.");
+        states.delete(mode.value);
+        restoreState(mode.value);
+      } catch (error) {
+        addMessage("assistant", "⚠️ " + error.message);
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    sampleButton.onclick = async () => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        const response = await fetch("/api/skills/reset", {
+          method: "POST",
+          body: JSON.stringify({ mode: mode.value }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || "Could not reset the conversation.");
+        messages.replaceChildren();
+        trace.replaceChildren();
+        for (const message of sampleTurns) await runTurn(message);
+      } catch (error) {
+        addMessage("assistant", "⚠️ " + error.message);
+      } finally {
+        saveState(mode.value);
+        setBusy(false);
+      }
+    };
+
+    document.getElementById("incidentSkillSourceButton").onclick = async (event) => {
+      const button = event.currentTarget;
+      const target = document.getElementById("incidentSkillSource");
+      if (target.classList.contains("open")) {
+        target.classList.remove("open");
+        target.replaceChildren();
+        button.textContent = "Show actual SKILL.md";
+        return;
+      }
+      button.disabled = true;
+      try {
+        const response = await fetch("/api/snippet?model=incident-skill");
+        if (!response.ok) throw new Error(await response.text());
+        const file = document.createElement("div");
+        file.className = "file";
+        file.textContent = ".github/skills/incident-triage/SKILL.md";
+        const code = document.createElement("pre");
+        code.className = "code";
+        code.textContent = await response.text();
+        target.replaceChildren(file, code);
+        target.classList.add("open");
+        button.textContent = "Hide SKILL.md";
+      } catch (error) {
+        target.textContent = "⚠️ Could not load skill: " + error.message;
+        target.classList.add("open");
+      } finally {
+        button.disabled = false;
+      }
+    };
+
+    fetch("/api/models").then((response) => response.json()).then((models) => {
+      if (models.local) document.getElementById("incidentModel").textContent = `${models.local} via local Ollama`;
+    }).catch((error) => console.error("Could not load local model name", error));
+  })();
 </script>
 <script>
   // Screen 6: long-term memory (favourite colour)

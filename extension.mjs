@@ -160,6 +160,35 @@ async function startServer(inst) {
                 emit(err ? { error: err } : { done: true });
                 return res.end();
             }
+            if (req.method === "POST" && url.pathname === "/api/skills/chat") {
+                const { message, mode } = await readJson(req);
+                if (!["skill", "baseline"].includes(mode)) {
+                    res.statusCode = 400;
+                    return json(res, { error: "Select a valid incident demo mode." });
+                }
+                if (typeof message !== "string" || !message.trim()) {
+                    res.statusCode = 400;
+                    return json(res, { error: "A message is required." });
+                }
+                res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" });
+                const emit = (event) => res.write(JSON.stringify(event) + "\n");
+                const err = await callBridge(
+                    { type: "skill_chat", mode, message },
+                    (text) => emit({ text }),
+                    (event) => emit({ tool_event: event }),
+                );
+                emit(err ? { error: err } : { done: true });
+                return res.end();
+            }
+            if (req.method === "POST" && url.pathname === "/api/skills/reset") {
+                const { mode } = await readJson(req);
+                if (!["skill", "baseline"].includes(mode)) {
+                    res.statusCode = 400;
+                    return json(res, { error: "Select a valid incident demo mode." });
+                }
+                const err = await callBridge({ type: "skill_reset", mode });
+                return json(res, { ok: !err, error: err });
+            }
             if (req.method === "POST" && url.pathname === "/api/chat/reset") {
                 const { model } = await readJson(req);
                 const err = await callBridge({ type: "reset", model });
@@ -184,6 +213,11 @@ async function startServer(inst) {
                 return json(res, JSON.parse(text));
             }
             if (req.method === "GET" && url.pathname === "/api/snippet") {
+                if (url.searchParams.get("model") === "incident-skill") {
+                    const code = await readFile(join(HERE, ".github", "skills", "incident-triage", "SKILL.md"), "utf8");
+                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                    return res.end(code);
+                }
                 const file = SNIPPETS[url.searchParams.get("model")];
                 res.setHeader("Content-Type", "text/plain; charset=utf-8");
                 if (!file) return res.end("# Microsoft Foundry snippet: coming in the next iteration.");
