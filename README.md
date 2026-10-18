@@ -1,17 +1,20 @@
 # Agents Under the Hood
 
-Source for the existing Copilot canvas: six reveal cards, an animated agent
-harness, and model chat with a code card. This is a migration of the current
-implementation, not yet a standalone browser app.
+Source for the Copilot canvas: six reveal cards, an animated agent harness,
+model chat with code cards, and local demos of memory, tools, and skills. This is
+not a standalone browser app.
 
 ## Layout
 
 - `extension.mjs`: Copilot canvas registration and loopback HTTP server.
-- `index.html`: the seven-screen UI.
+- `index.html`: the eight-screen UI.
 - `components.mjs`: reveal-card content and helpers.
+- `.github\skills\incident-triage\SKILL.md`: reusable incident-triage instructions
+  loaded by the skills demonstration.
 - `maf\`: Python Agent Framework bridge, local and Foundry agents, the two
   short-term memory demo agents (`memory_stateless_agent.py`,
-  `memory_session_agent.py`), dependencies, and an example configuration.
+  `memory_session_agent.py`), the incident-skill demo, dependencies, and an
+  example configuration.
 
 ## Screens
 
@@ -48,6 +51,45 @@ implementation, not yet a standalone browser app.
    and independently scrollable binding/definition snippets.
    Foundry usage incurs costs; web queries leave Azure compliance/geographic
    boundaries. Do not enter sensitive information.
+8. Skills: an incident-triage chat with a **Skill available** mode and a
+   **Baseline** mode using the same configured local Ollama model. Run the
+   two-turn sample to see the incident context select and load the actual
+   `.github\skills\incident-triage\SKILL.md`, inspect the observable execution
+   events, and compare against a fresh baseline conversation. The local demo
+   uses a small deterministic keyword selector for a reproducible walkthrough;
+   it is not a model's private reasoning or a general-purpose skill-selection
+   engine. No Azure access is needed.
+
+### Incident-triage skill demo (screen 8)
+
+The example skill's discovery metadata is its YAML `name` and `description`;
+its reusable procedure is the Markdown body in `SKILL.md`. The local demo
+checks the incoming text for incident-related selector terms and, on a match,
+reads that file and supplies the instructions to the Ollama-backed Agent
+Framework agent. The trace records the selection, matched terms, file load (or
+reuse), and the skill path. **Show actual SKILL.md** displays the file used.
+This is an observable runtime trace, not hidden chain-of-thought.
+Both modes on this screen use local Ollama: they compare skill availability,
+not local versus Foundry. The Foundry agents on screens 3 and 7 do not load this
+skill.
+
+Select **Skill available** and click **Run sample conversation**:
+
+> Our checkout service has been unreliable since this morning's release. Help me investigate, but don't change anything.
+
+**Sample prompt to test the incident-triage skill:** Paste the following query into screen 8, either on its own or as the follow-up in the sample conversation:
+
+> At 10:02 we deployed version 2.8. At 10:05, HTTP 500s rose from 0.2% to 12%. Logs include “database connection timeout.” Database CPU stayed at 35%. Restarting one instance helped for two minutes. What’s happening, and what should we check next?
+
+The skill asks the agent to separate facts, hypotheses, and unknowns; rank explanations by evidence; provide checks that can support or weaken each hypothesis; favor read-only diagnostics; and avoid claiming an unproven root cause. The sample makes the release timing a correlation and does not treat moderate database CPU as ruling out connection issues.
+
+For a controlled comparison, run the sample in **Skill available**, then select **Baseline · skill unavailable** and run it again. Each mode has an independent conversation; the sample button resets the selected one first. Both use `OLLAMA_MODEL` (default `phi3:3.8b`) through local Ollama, with temperature 0. Baseline mode exposes no skill candidate or skill instructions. A baseline model can still produce some of the same good advice: compare observable outputs rather than assuming it must fail. Selection uses documented keyword matching, so the trace is deterministic; a production runtime may select skills differently.
+
+Local setup is the existing Ollama setup above. Start Ollama with the configured model available, reload the extension, open screen 8, and run the sample. For an implementation smoke test, run:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s .\maf -p "test_incident_triage_agent.py"
+```
 
 ### Foundry tools setup (screen 7)
 
@@ -101,9 +143,10 @@ extensions under `.github\extensions\`, so this copy does not register a second
 provider. The existing installation at
 `C:\Users\pauld\.copilot\extensions\agents-under-the-hood`
 serves its installed snapshot. Editing source here does not update it automatically;
-to test changes, explicitly copy the updated source and Python modules there,
-preserve its `.venv` and private `maf\.env`, then reload extensions and reopen
-the canvas.
+to test changes, copy the updated `index.html`, `extension.mjs`, and Python
+modules there, copy `.github\skills\incident-triage\SKILL.md` to the matching
+path under the installed extension, preserve its `.venv` and private `maf\.env`,
+then reload extensions and reopen the canvas.
 
 ## Setup (Windows PowerShell)
 

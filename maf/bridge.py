@@ -37,6 +37,17 @@ def send(obj):
 async def handle(req):
     rid = req.get("id")
     try:
+        if req["type"] in ("skill_chat", "skill_reset"):
+            skill_agent = importlib.import_module("incident_triage_agent")
+            mode = req.get("mode")
+            if req["type"] == "skill_reset":
+                skill_agent.reset(mode)
+            else:
+                stream = skill_agent.chat(req["message"], mode, lambda event: send({"id": rid, "tool_event": event}))
+                async for text in stream:
+                    send({"id": rid, "delta": text})
+            send({"id": rid, "done": True})
+            return
         if req["type"] == "models":
             send({"id": rid, "delta": json.dumps({
                 "local": os.getenv("OLLAMA_MODEL", "phi3:3.8b"),
