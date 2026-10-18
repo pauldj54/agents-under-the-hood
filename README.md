@@ -149,6 +149,46 @@ saved agent: rerun `setup_foundry_tools.py`, update
 These settings apply to the copy of `maf\.env` beside the running bridge;
 the separately installed extension does not read this repository's `.env`.
 
+### Foundry conversation tracing with Application Insights
+
+An existing **Azure Monitor Application Insights** resource has been connected
+to the Foundry project to inspect conversations with the Foundry agent.
+This is a project-side Azure configuration, not a new resource provisioned by
+this repository.
+
+To configure the same setup in another project, open the project in
+[Microsoft Foundry](https://ai.azure.com/), select **Agents > Traces > Connect**,
+and select an existing Application Insights resource. An alternative path is
+**Manage > Project details > Connected resources > Add connection >
+Application Insights**. You need permission to connect the resource and
+appropriate telemetry-reading permissions, such as **Log Analytics Reader**.
+
+Once connected, Foundry automatically exports server-side traces for its
+hosted agent runtime, including the saved prompt agent used by screen 7's
+**Foundry** option. This connection does not require an Application Insights
+connection string in `maf\.env` or a telemetry SDK in the local bridge.
+
+To inspect a conversation, send a message through screen 7 with **Foundry**
+selected, then open **Agents > Traces** in the same Foundry project. Allow a
+few minutes for ingestion and refresh if needed. Select a trace to inspect
+available model calls, tool activity, duration, status, and errors. Open its
+**Conversation ID**, when available, to review the dialogue and run steps.
+Telemetry can also be inspected in the connected Application Insights resource
+in the Azure portal.
+
+This is not end-to-end instrumentation of the Copilot canvas or local Python
+process. Local Ollama conversations and the locally executed calculator are not
+automatically traced by this connection. Screen 3's `FoundryChatClient` is a
+direct model client, not the saved prompt agent; do not assume it has the same
+agent conversation tracing. Additional client-side OpenTelemetry instrumentation
+would be needed to capture local operations and correlate them with service calls.
+
+Trace data can include prompts, responses, and tool arguments or results.
+Avoid sensitive inputs, restrict access, and review the connected resource's
+retention and ingestion costs. See Microsoft's
+[Foundry tracing setup guide](https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-setup)
+for configuration, permissions, and troubleshooting.
+
 ## Run
 
 The current working installation runs through Copilot. Open the
