@@ -484,6 +484,36 @@
   let busy = false, hoodOpen = false;
   const histories = { local: "", foundry: "" };
   let displayedModel = "local";
+  let localToolsModel = "llama3.2:1b";
+
+  async function loadModelNames() {
+    try {
+      const res = await fetch("/api/models");
+      if (!res.ok) throw new Error(await res.text());
+      const models = await res.json();
+      for (const key of ["local", "foundry", "tools"]) {
+        if (typeof models[key] !== "string" || !models[key].trim()) {
+          throw new Error(`Missing configured model name: ${key}`);
+        }
+      }
+      const names = new Map([
+        ["phi3:3.8b", models.local],
+        ["MAI-Thinking-1", models.foundry],
+        ["llama3.2:1b", models.tools],
+      ]);
+      for (const el of document.querySelectorAll(".meta, #model option")) {
+        el.textContent = el.textContent.replace(/phi3:3\.8b|MAI-Thinking-1|llama3\.2:1b/g,
+          (name) => names.get(name));
+      }
+      MODELS.local.meta = `Agent · ${models.local} via Ollama`;
+      MODELS.foundry.meta = `Agent · ${models.foundry} via Microsoft Foundry · Entra ID`;
+      localToolsModel = models.tools;
+    } catch (err) {
+      $("agentMeta").textContent = "⚠️ Could not load model configuration: " + err.message;
+      console.error("Could not load model configuration", err);
+    }
+  }
+  loadModelNames();
 
   function setBusy(value) {
     busy = value;
@@ -854,7 +884,7 @@
       }
       const cloud = displayed === "tools-foundry";
       $("toolsTitle").textContent = cloud ? "FoundryToolsAgent" : "CalculatorLlama";
-      $("toolsMeta").textContent = cloud ? "Foundry prompt agent · web search in cloud, calculator here" : "llama3.2:1b via Ollama · native tool calling";
+      $("toolsMeta").textContent = cloud ? "Foundry prompt agent · web search in cloud, calculator here" : `${localToolsModel} via Ollama · native tool calling`;
       $("toolsWebStatus").textContent = cloud ? "server-side · available with setup" : "Disabled locally";
       $("toolsWebHint").textContent = cloud ? "Requires an Azure OpenAI deployment and configured prompt agent. Search sources appear as links in the reply." : "Switch explicitly to Foundry to use its server-side Web Search tool, grounded by Bing.";
       prompt.placeholder = cloud ? "Search for recent AI news, then calculate 2 + 8" : "Calculate 2 + 8";

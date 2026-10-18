@@ -1,10 +1,12 @@
+import os
+
 from agent_framework import Agent
 from agent_framework.ollama import OllamaChatClient
 
 # 1. Connect to the LLM running locally in Ollama
 client = OllamaChatClient(
     host="http://localhost:11434",
-    model="phi3:3.8b",
+    model=os.getenv("OLLAMA_MODEL", "phi3:3.8b"),
 )
 
 # 2. Wrap the model in an agent with instructions

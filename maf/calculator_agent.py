@@ -1,6 +1,7 @@
 """Native Ollama tool calling with Agent Framework's registered calculator."""
 
 import math
+import os
 from contextvars import ContextVar
 from typing import Callable
 
@@ -47,7 +48,10 @@ def calculator(a: float, b: float, operation: str) -> dict:
 
 
 agent = Agent(
-    client=OllamaChatClient(host="http://localhost:11434", model="llama3.2:1b"),
+    client=OllamaChatClient(
+        host="http://localhost:11434",
+        model=os.getenv("OLLAMA_TOOLS_MODEL", "llama3.2:1b"),
+    ),
     name="CalculatorLlama",
     instructions=(
         "Always call the calculator tool for arithmetic, even for division by zero. "

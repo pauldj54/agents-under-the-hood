@@ -12,8 +12,14 @@ from dotenv import load_dotenv
 from foundry_tools_agent import prompt_definition
 
 
-async def setup(model: str, name: str):
+async def setup(model: str | None, name: str):
     load_dotenv(Path(__file__).with_name(".env"), override=False)
+    model = model or os.getenv("FOUNDRY_TOOLS_MODEL_DEPLOYMENT_NAME")
+    if not model or not model.strip():
+        raise ValueError(
+            "Set FOUNDRY_TOOLS_MODEL_DEPLOYMENT_NAME in maf\\.env "
+            "or pass --model with an existing Azure OpenAI deployment."
+        )
     async with AzureCliCredential(tenant_id=os.environ["AZURE_TENANT_ID"]) as credential:
         async with AIProjectClient(
             endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"], credential=credential,
@@ -34,7 +40,11 @@ async def setup(model: str, name: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", required=True, help="Existing Azure OpenAI deployment with Web Search support")
+    parser.add_argument(
+        "--model",
+        help="Existing Azure OpenAI deployment with Web Search support; "
+        "overrides FOUNDRY_TOOLS_MODEL_DEPLOYMENT_NAME in maf\\.env",
+    )
     parser.add_argument("--name", default="agents-under-the-hood-tools")
     args = parser.parse_args()
     asyncio.run(setup(args.model, args.name))
