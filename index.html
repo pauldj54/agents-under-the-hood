@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Agents Under the Hood</title>
 <style>
   * { box-sizing: border-box; }
@@ -184,12 +185,331 @@
   @media (max-width: 1100px) { #toolsHood.open, #cloudHood.open { height: 640px; flex: none; } }
   @media (max-width: 1100px) { .tools-layout { grid-template-columns: 1fr; height: auto; } }
   @keyframes memflash { 0% { transform: scale(1.25); } 100% { transform: scale(1); } }
+
+  /* A field guide for the moving parts behind an agent, not a hosted dashboard. */
+  :root {
+    color-scheme: dark;
+    --ink: #111923;
+    --panel: #19232e;
+    --panel-raised: #202c38;
+    --paper: #edf1eb;
+    --muted: #a2b0bd;
+    --rule: #394652;
+    --signal: #51d6c2;
+    --brass: #e8b15b;
+    --blue: #85b7ed;
+    --background-color-default: var(--ink);
+    --text-color-default: var(--paper);
+    --text-color-muted: var(--muted);
+    --border-color-default: var(--rule);
+    --color-focus-outline: var(--signal);
+    --font-sans: "Segoe UI Variable", "Segoe UI", sans-serif;
+    --font-mono: "Cascadia Code", Consolas, monospace;
+  }
+  html { min-width: 320px; }
+  body {
+    min-height: 100vh;
+    padding: 24px clamp(18px, 4vw, 64px) 52px;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  h1, .name, .letter {
+    font-family: Bahnschrift, "Segoe UI Variable", "Segoe UI", sans-serif;
+    letter-spacing: -.035em;
+  }
+  h1 {
+    font-size: clamp(28px, 3.2vw, 42px);
+    line-height: 1.08;
+    font-weight: 650;
+  }
+  .screen { max-width: 1320px; margin: 0 auto; }
+  .screen > header { text-align: left; margin: 36px 0 26px; }
+  .screen > header h1 { max-width: 860px; margin-bottom: 10px; }
+  .sub { color: var(--muted); }
+  button, select, .composer textarea {
+    font-family: var(--font-sans);
+    border-radius: 4px;
+  }
+  button {
+    min-height: 38px;
+    padding: 7px 13px;
+    border-color: var(--rule);
+    color: var(--paper);
+    transition: border-color .16s ease, background-color .16s ease, color .16s ease;
+  }
+  button:hover:not(:disabled) {
+    border-color: var(--signal);
+    background-color: color-mix(in srgb, var(--signal) 8%, transparent);
+  }
+  :focus-visible {
+    outline: 2px solid var(--signal);
+    outline-offset: 3px;
+  }
+  .navbar {
+    position: relative;
+    top: auto;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 0 0 15px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--ink);
+  }
+  .navbar .navbtn { width: fit-content; }
+  .navbar #back { justify-self: start; }
+  .navbar #next { justify-self: end; }
+  .navbtn {
+    min-height: 40px;
+    padding: 8px 15px;
+    border: 1px solid var(--signal);
+    border-radius: 4px;
+    background: var(--signal);
+    color: var(--ink);
+    font-weight: 650;
+  }
+  .navbtn:hover:not(:disabled) {
+    border-color: #87eadb;
+    background: #87eadb;
+    color: var(--ink);
+  }
+  .navbar button.navbtn:disabled {
+    border-color: var(--rule);
+    background: var(--panel);
+    color: #8795a5;
+    opacity: 1;
+    pointer-events: none;
+  }
+  .navbtn:disabled {
+    border-color: var(--rule);
+    color: #71808d;
+    background: transparent;
+    opacity: 1;
+  }
+  .progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  #pos {
+    color: var(--paper);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .progress-track {
+    width: 72px;
+    height: 3px;
+    overflow: hidden;
+    background: var(--rule);
+  }
+  .progress-track span {
+    display: block;
+    width: 12.5%;
+    height: 100%;
+    background: var(--signal);
+    transition: width .2s ease;
+  }
+  .grid {
+    max-width: 1120px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin: 34px 0 0;
+  }
+  .card {
+    min-height: 206px;
+    padding: 22px;
+    align-items: flex-start;
+    border: 1px solid var(--rule);
+    border-left: 3px solid transparent;
+    border-radius: 3px;
+    background: var(--panel);
+    text-align: left;
+    transition: border-color .16s ease, background-color .16s ease;
+  }
+  .card:hover {
+    transform: none;
+    border-color: var(--rule);
+    border-left-color: var(--hue);
+    background: var(--panel-raised);
+    box-shadow: none;
+  }
+  .card.flip { animation-duration: .28s; }
+  .stage-dots { top: 14px; right: 16px; gap: 4px; }
+  .stage-dots span { width: 6px; height: 6px; border-radius: 1px; background: #566371; }
+  .stage-dots span.on { background: var(--hue); }
+  .letter {
+    color: var(--hue);
+    font-size: clamp(76px, 7vw, 98px);
+    line-height: .95;
+    font-weight: 700;
+  }
+  .hint { margin-top: auto; padding-top: 20px; color: var(--muted); font-size: 13px; }
+  .tiles { justify-content: flex-start; padding-top: 14px; }
+  .tile {
+    width: 32px;
+    height: 38px;
+    border: 1px solid color-mix(in srgb, var(--hue) 40%, var(--rule));
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--hue) 12%, var(--panel));
+    color: var(--hue);
+  }
+  .icon { margin: auto 0 6px; font-size: 30px; }
+  .name { margin: 0 0 8px; color: var(--hue); font-size: 21px; }
+  .def { color: var(--paper); text-align: left; }
+  .toolbar { max-width: 1120px; margin: 16px 0 0; text-align: right; }
+  .definition {
+    max-width: 860px;
+    margin: 26px 0 14px;
+    text-align: left;
+    font-size: clamp(17px, 2vw, 20px);
+    line-height: 1.65;
+  }
+  .definition strong { color: var(--signal); }
+  .scene { max-width: 1020px; margin: 8px 0 0; }
+  .scene .lbl { font-size: 17px; }
+  .ground { stroke: var(--rule); }
+  .llm { animation-name: glow-signal; }
+  @keyframes glow-signal {
+    from { filter: drop-shadow(0 0 2px var(--signal)); }
+    to { filter: drop-shadow(0 0 9px color-mix(in srgb, var(--signal) 70%, transparent)); }
+  }
+  .s3-head, .s3, .s4 { max-width: 1320px; }
+  .s3-head { margin-top: 36px; margin-bottom: 20px; }
+  .s3-head h1 { font-size: clamp(27px, 3vw, 38px); }
+  .s3, .s4 {
+    height: min(66vh, 690px);
+    min-height: 470px;
+    gap: 14px;
+  }
+  .panel {
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: var(--panel);
+  }
+  .panel-head {
+    min-height: 56px;
+    gap: 12px;
+    padding: 10px 14px;
+    border-color: var(--rule);
+  }
+  .panel-head .title { color: var(--paper); }
+  .panel-head .meta { color: var(--muted); }
+  .badge {
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--signal) 14%, var(--panel));
+    color: var(--signal);
+  }
+  .avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 3px;
+    background: var(--signal);
+    color: var(--ink);
+  }
+  .msg.user .avatar { background: var(--brass); color: var(--ink); }
+  .messages { padding: 18px; }
+  .empty { max-width: 360px; color: var(--muted); }
+  .msg { max-width: 90%; }
+  .bubble {
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: var(--panel-raised);
+  }
+  .msg.user .bubble {
+    border-color: color-mix(in srgb, var(--brass) 50%, var(--rule));
+    background: color-mix(in srgb, var(--brass) 15%, var(--panel));
+    color: var(--paper);
+  }
+  .composer {
+    align-items: center;
+    padding: 10px;
+    border-color: var(--rule);
+    background: var(--panel);
+  }
+  .composer textarea {
+    min-height: 44px;
+    border-color: var(--rule);
+    border-radius: 3px;
+    background: var(--ink);
+    color: var(--paper);
+  }
+  .composer textarea::placeholder { color: #8795a5; }
+  select {
+    border-color: var(--rule);
+    border-radius: 3px;
+    background: var(--panel);
+    color: var(--paper);
+  }
+  .hood { gap: 18px; }
+  .hood-icon { color: var(--brass); }
+  pre.code, .incident-trace pre {
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: #121b24;
+    color: var(--paper);
+  }
+  .code .k { color: #f39b85; }
+  .code .s { color: #9ed8e8; }
+  .code .c { color: #91a39b; }
+  .code .f { color: #c5b2ed; }
+  .code .hl { background: color-mix(in srgb, var(--brass) 25%, transparent); }
+  .file { color: var(--muted); }
+  .memcard {
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--signal);
+    border-radius: 3px;
+    background: var(--panel);
+  }
+  .memval.known { color: var(--signal); }
+  .sources a { color: var(--blue); }
+  .tool-event { color: var(--muted); }
+  .incident-layout { grid-template-columns: 1.3fr 1fr; }
+  .incident-actions { padding: 10px 12px 14px !important; }
+  .incident-trace { max-height: 340px; }
+  a { color: var(--blue); }
+  @media (max-width: 860px) {
+    body { padding: 16px 18px 32px; }
+    .screen > header { margin-top: 26px; }
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .s3, .s4 { min-height: 0; }
+    .s3 .panel, .s4 .panel { min-height: 420px; }
+    .s4 .hood { max-height: none; }
+  }
+  @media (max-width: 560px) {
+    body { padding: 12px 14px 28px; }
+    .navbar { grid-template-columns: 1fr auto 1fr; gap: 6px; }
+    .navbar .navbtn { padding: 7px 9px; font-size: 13px; }
+    .progress { gap: 6px; }
+    .progress-track { width: 38px; }
+    .grid { grid-template-columns: 1fr; gap: 9px; margin-top: 22px; }
+    .card { min-height: 160px; }
+    .s3-head { align-items: flex-start; }
+    .s3-head > label { display: grid; gap: 6px; }
+    .s3 .panel, .s4 .panel { min-height: 380px; }
+    .msg { max-width: 100%; }
+    .scene { min-height: 220px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      scroll-behavior: auto !important;
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .01ms !important;
+    }
+  }
 </style>
 </head>
 <body>
   <div class="navbar">
     <button class="navbtn" id="back">← Back</button>
-    <span id="pos"></span>
+    <div class="progress" aria-label="Screen progress">
+      <span id="pos" aria-live="polite"></span>
+      <span class="progress-track" aria-hidden="true"><span id="progressFill"></span></span>
+    </div>
     <button class="navbtn" id="next">Next →</button>
   </div>
 
@@ -281,8 +601,9 @@
       <div>
         <label for="model">Model</label>
         <select id="model">
-          <option value="local">🖥️ phi3:3.8b · Ollama (local)</option>
-          <option value="foundry">☁️ MAI-Thinking-1 · Microsoft Foundry (remote)</option>
+          <option value="local">Local · Phi 3.8B · Ollama</option>
+          <option value="local-llama">Local · Llama 3.2 1B · Ollama</option>
+          <option value="foundry">Foundry · MAI-Thinking-1</option>
         </select>
       </div>
     </div>
@@ -316,7 +637,15 @@
     <div class="s3-head">
       <h1>Short-term memory</h1>
       <span class="sub">Same model, same instructions. The only difference is the session.</span>
+      <label for="memoryRuntime">Runtime
+        <select id="memoryRuntime">
+          <option value="local">Local · Phi 3.8B · Ollama</option>
+          <option value="local-llama">Local · Llama 3.2 1B · Ollama</option>
+          <option value="foundry">Foundry · GPT chat</option>
+        </select>
+      </label>
     </div>
+    <p class="sub" id="memoryRuntimeHint" style="max-width:1320px;margin:0 auto 16px">Local models can guess incorrectly, even with conversation history. Try “Ich wohne in Nürnberg”, then “Wo wohne ich?”.</p>
     <div class="s4">
       <div class="panel" id="mem-stateless">
         <div class="panel-head">
@@ -528,7 +857,11 @@
     screens.forEach((s, k) => s.classList.toggle("active", k === i));
     back.disabled = i === 0;
     next.disabled = i === screens.length - 1;
-    document.getElementById("pos").textContent = `${i + 1} / ${screens.length}`;
+    const step = String(i + 1).padStart(2, "0");
+    const total = String(screens.length).padStart(2, "0");
+    document.getElementById("pos").textContent = `${step} / ${total}`;
+    document.getElementById("pos").parentElement.setAttribute("aria-label", `Screen ${i + 1} of ${screens.length}`);
+    document.getElementById("progressFill").style.width = `${((i + 1) / screens.length) * 100}%`;
   }
   back.onclick = () => show(cur - 1);
   next.onclick = () => show(cur + 1);
@@ -538,19 +871,23 @@
   const $ = (id) => document.getElementById(id);
   const MODELS = {
     local:   { name: "LocalPhi", meta: "Agent · phi3:3.8b via Ollama", badge: "local" },
+    "local-llama": { name: "LocalLlama", meta: "Agent · llama3.2:1b via Ollama", badge: "local" },
     foundry: { name: "FoundryAgent", meta: "Agent · MAI-Thinking-1 via Microsoft Foundry · Entra ID", badge: "remote" },
   };
   let busy = false, hoodOpen = false;
-  const histories = { local: "", foundry: "" };
+  const histories = { local: "", "local-llama": "", foundry: "" };
   let displayedModel = "local";
   let localToolsModel = "llama3.2:1b";
+  let configuredModels = {
+    local: "phi3:3.8b", local_llama: "llama3.2:1b", memory_foundry: "gpt-chat-latest",
+  };
 
   async function loadModelNames() {
     try {
       const res = await fetch("/api/models");
       if (!res.ok) throw new Error(await res.text());
       const models = await res.json();
-      for (const key of ["local", "foundry", "tools"]) {
+      for (const key of ["local", "local_llama", "foundry", "tools"]) {
         if (typeof models[key] !== "string" || !models[key].trim()) {
           throw new Error(`Missing configured model name: ${key}`);
         }
@@ -565,8 +902,20 @@
           (name) => names.get(name));
       }
       MODELS.local.meta = `Agent · ${models.local} via Ollama`;
+      MODELS["local-llama"].meta = `Agent · ${models.local_llama} via Ollama`;
       MODELS.foundry.meta = `Agent · ${models.foundry} via Microsoft Foundry · Entra ID`;
       localToolsModel = models.tools;
+      if (typeof models.memory_foundry !== "string" || !models.memory_foundry.trim()) {
+        throw new Error("Missing configured model name: memory_foundry");
+      }
+      configuredModels = models;
+      $("model").querySelector('[value="local"]').textContent = `Local · Phi · ${models.local}`;
+      $("model").querySelector('[value="local-llama"]').textContent = `Local · Llama · ${models.local_llama}`;
+      $("model").querySelector('[value="foundry"]').textContent = `Foundry · ${models.foundry}`;
+      $("memoryRuntime").querySelector('[value="local"]').textContent = `Local · Phi · ${models.local}`;
+      $("memoryRuntime").querySelector('[value="local-llama"]').textContent = `Local · Llama · ${models.local_llama}`;
+      $("memoryRuntime").querySelector('[value="foundry"]').textContent = `Foundry · ${models.memory_foundry}`;
+      document.dispatchEvent(new Event("modelsready"));
     } catch (err) {
       $("agentMeta").textContent = "⚠️ Could not load model configuration: " + err.message;
       console.error("Could not load model configuration", err);
@@ -638,7 +987,8 @@
       return;
     }
     if (!hoodOpen || $("model").value !== model) return;
-    const file = `maf/${model === "local" ? "local" : "foundry"}_agent.py · the exact code running this chat`;
+    const source = model === "local-llama" ? "local_llama" : model === "foundry" ? "foundry" : "local";
+    const file = `maf/${source}_agent.py · the exact code running this chat`;
     $("hood").className = "hood open";
     $("hood").innerHTML = `<div class="file">${file}</div><pre class="code">${highlight(code)}</pre>
       <div><button id="hideBtn">Hide code</button></div>`;
@@ -683,14 +1033,54 @@
 </script>
 <script>
   // Screen 4: two independent chats, one stateless and one session-based
-  function memoryChat(root, model) {
+  const memoryRuntime = document.getElementById("memoryRuntime");
+  const memoryBusy = new Set();
+  memoryRuntime.addEventListener("change", () => {
+    const hints = {
+      local: `Both panels use ${configuredModels.local} via Ollama.`,
+      "local-llama": `Both panels use ${configuredModels.local_llama} via Ollama.`,
+      foundry: `Both panels use ${configuredModels.memory_foundry} via Foundry. Prompts leave your computer and usage incurs costs.`,
+    };
+    document.getElementById("memoryRuntimeHint").textContent =
+      `${hints[memoryRuntime.value]} Try “Ich wohne in Nürnberg”, then “Wo wohne ich?”.`;
+  });
+  function memoryChat(root, mode) {
+    const model = () => {
+      const runtime = memoryRuntime.value;
+      return runtime === "foundry" ? `memory-foundry-${mode}`
+        : runtime === "local-llama" ? `memory-llama-${mode}` : mode;
+    };
+    let displayed = model();
+    const histories = new Map();
     const q = (s) => root.querySelector(s);
     const messages = q(".messages"), prompt = q("textarea"), send = q(".composer .navbtn"), newChat = q(".newChat"), hood = q(".hood");
     const hint = hood.querySelector(".hood-hint").textContent;
     const emptyHtml = messages.innerHTML;
     let busy = false;
+    let hoodOpen = false;
 
-    function setBusy(v) { busy = v; send.disabled = v; newChat.disabled = v; }
+    function setBusy(v) {
+      busy = v; send.disabled = v; newChat.disabled = v;
+      if (v) memoryBusy.add(mode); else memoryBusy.delete(mode);
+      memoryRuntime.disabled = memoryBusy.size > 0;
+    }
+    function updateMeta() {
+      const runtime = memoryRuntime.value;
+      const foundry = runtime === "foundry";
+      const selectedModel = foundry ? configuredModels.memory_foundry
+        : runtime === "local-llama" ? configuredModels.local_llama : configuredModels.local;
+      q(".meta").textContent = `${mode === "session" ? "Session" : "No session"} · ${selectedModel} via ${foundry ? "Microsoft Foundry" : "Ollama"}`;
+    }
+    document.addEventListener("modelsready", updateMeta);
+    memoryRuntime.addEventListener("change", () => {
+      histories.set(displayed, messages.innerHTML);
+      displayed = model();
+      messages.innerHTML = histories.get(displayed) || emptyHtml;
+      prompt.value = "";
+      updateMeta();
+      if (hoodOpen) openHood();
+    });
+    updateMeta();
 
     function addMsg(role, text) {
       messages.querySelector(".empty")?.remove();
@@ -712,7 +1102,7 @@
       const bubble = addMsg("assistant", "");
       bubble.classList.add("typing");
       try {
-        const res = await fetch("/api/chat", { method: "POST", body: JSON.stringify({ model, message }) });
+        const res = await fetch("/api/chat", { method: "POST", body: JSON.stringify({ model: model(), message }) });
         if (!res.ok) throw new Error(await res.text());
         const reader = res.body.getReader(), dec = new TextDecoder();
         for (;;) {
@@ -729,23 +1119,31 @@
     }
 
     function closeHood() {
+      hoodOpen = false;
       hood.className = "hood";
       hood.innerHTML = `<p class="hood-hint">${hint}</p><button class="navbtn lookBtn">Look under the hood</button>`;
       hood.querySelector(".lookBtn").onclick = openHood;
     }
 
     async function openHood() {
+      hoodOpen = true;
+      const selected = model();
       let code;
       try {
-        const res = await fetch("/api/snippet?model=" + model);
+        const res = await fetch("/api/snippet?model=" + selected);
         if (!res.ok) throw new Error(await res.text());
         code = await res.text();
       } catch (err) {
+        if (!hoodOpen || selected !== model()) return;
         hood.textContent = "⚠️ Could not load code: " + err.message;
         return;
       }
+      if (!hoodOpen || selected !== model()) return;
+      const runtime = memoryRuntime.value === "foundry" ? "foundry_"
+        : memoryRuntime.value === "local-llama" ? "llama_" : "";
+      const file = `memory_${runtime}${mode}_agent.py`;
       hood.className = "hood open";
-      hood.innerHTML = `<div class="file">maf/memory_${model}_agent.py · the exact code running this chat</div><pre class="code">${highlight(code)}</pre>
+      hood.innerHTML = `<div class="file">maf/${file} · the exact code running this chat</div><pre class="code">${highlight(code)}</pre>
         <div><button class="hideBtn">Hide code</button></div>`;
       hood.querySelector(".hideBtn").onclick = closeHood;
     }
@@ -754,10 +1152,12 @@
       if (busy) return;
       setBusy(true);
       try {
-        const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model }) });
+        const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model: model() }) });
+        if (!res.ok) throw new Error(await res.text());
         const result = await res.json();
         if (!result.ok) throw new Error(result.error);
         messages.innerHTML = emptyHtml;
+        histories.delete(displayed);
       } catch (err) {
         addMsg("assistant", "⚠️ Could not reset chat: " + err.message);
       } finally {
@@ -1260,7 +1660,7 @@
   })();
 </script>
 <script>
-  const HUES = ["#a371f7", "#2f81f7", "#3fb950", "#d29922", "#db61a2", "#f85149"];
+  const HUES = ["#51d6c2", "#51d6c2", "#51d6c2", "#51d6c2", "#51d6c2", "#51d6c2"];
   const grid = document.getElementById("grid");
   let state = null;
   let prev = {};

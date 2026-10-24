@@ -3,6 +3,7 @@ import os
 from agent_framework import Agent
 from agent_framework.foundry import FoundryChatClient
 from azure.identity.aio import AzureCliCredential
+from chat_instructions import CHAT_INSTRUCTIONS
 
 # Reuse az login in this tenant. No API key or browser token is needed.
 credential = AzureCliCredential(
@@ -18,7 +19,7 @@ client = FoundryChatClient(
 agent = Agent(
     client=client,
     name="FoundryAgent",
-    instructions="You are a friendly assistant.",
+    instructions=CHAT_INSTRUCTIONS,
 )
 session = agent.create_session()
 

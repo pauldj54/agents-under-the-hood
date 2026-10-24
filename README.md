@@ -1,14 +1,84 @@
 # Agents Under the Hood
 
-Source for the Copilot canvas: six reveal cards, an animated agent harness,
-model chat with code cards, and local demos of memory, tools, and skills. This is
-not a standalone browser app.
+An eight-screen local web application and Copilot canvas: six reveal cards, an
+animated agent harness, model chat with code cards, and local demos of memory,
+tools, and skills. Both entry points serve the exact same UI and demo backend.
+
+## Run the local web application
+
+### Requirements
+
+- **Node.js 22 or later** (npm is included).
+- For live chat demos: **Python 3.11** and [Ollama](https://ollama.com/).
+- Microsoft Foundry is optional; the local demos do not require Azure credentials.
+
+You can start the UI without Python or Ollama, but chat features need their
+respective local model services.
+
+### First-time setup (Windows PowerShell)
+
+Run these commands from the repository root to create the Python environment,
+install the agent dependencies, and download the models used by the local demos:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r .\maf\requirements.txt
+
+# Preserve an existing private configuration file.
+if (-not (Test-Path .\maf\.env)) {
+    Copy-Item .\maf\.env.example .\maf\.env
+}
+
+ollama pull phi3:3.8b
+ollama pull llama3.2:1b
+```
+
+Make sure Ollama is running. If it did not start automatically, run `ollama
+serve` in a separate terminal and leave it running.
+
+### Start the app
+
+From the repository root, run:
+
+```powershell
+npm start
+```
+
+Open **http://127.0.0.1:3000/** in your browser. All eight screens, reveal
+cards, animations, navigation, and code views are available. Chat features use
+the local Ollama models configured above. If a backend dependency or model is
+unavailable, the app reports the error rather than showing a simulated answer.
+No `npm install`, frontend build, Copilot installation, or Azure account is
+needed for the local app.
+
+Stop the app with **Ctrl+C**; this also stops its Python bridge.
+
+The server listens only on your computer (`127.0.0.1`). To use a different port:
+
+```powershell
+$env:PORT = "3001"
+npm start
+```
+
+Set `PORT=0` to let the app choose an available port; open the URL printed at
+startup. Restart the app after changing `maf\.env` or Python code; refresh the
+browser after changing HTML. The app is a single-user local demo: browser tabs
+share conversations and reveal-card state. Conversation and preference memory
+survive the demo's "New session" operation, but not an app restart.
+
+The launcher uses `.venv\Scripts\python.exe` on Windows or `.venv/bin/python`
+on macOS/Linux. Set `PYTHON_EXECUTABLE` to use a different Python executable.
+Foundry remains opt-in on screens 3, 4, and 7; the app does not create Azure resources.
 
 ## Layout
 
-- `extension.mjs`: Copilot canvas registration and loopback HTTP server.
+- `app.mjs`: standalone local web application launcher (`npm start`).
+- `server.mjs`: shared loopback HTTP server and Python bridge.
+- `extension.mjs`: optional Copilot canvas registration and actions.
 - `index.html`: the eight-screen UI.
 - `components.mjs`: reveal-card content and helpers.
+- `maf\chat_instructions.py`: shared concise, language-matching instructions for
+  screens 3 and 4, also shown by their code views.
 - `.github\skills\incident-triage\SKILL.md`: reusable incident-triage instructions
   loaded by the skills demonstration.
 - `maf\`: Python Agent Framework bridge, local and Foundry agents, the two
@@ -20,11 +90,23 @@ not a standalone browser app.
 
 1. Six reveal cards.
 2. The agent harness.
-3. Connecting to an LLM (local Phi or Foundry).
-4. Short-term memory: two chats side by side on the local Phi model, one
+3. Connecting to an LLM: choose Local Phi, Local Llama, or Foundry. Replies are
+   instructed to use the user's language and one short paragraph (at most three
+   sentences and 60 words), without inventing personal facts.
+4. Short-term memory: two chats side by side, one
    stateless (`agent.run(message)`) and one using a session
-   (`agent.run(message, session=session)`). Each has a "Look under the hood"
-   button that shows its exact code. Requires `ollama pull phi3:3.8b`.
+   (`agent.run(message, session=session)`). Starts with **Local · Phi** (default
+   `OLLAMA_MODEL=phi3:3.8b`). Choose **Local · Llama** to use
+   `OLLAMA_CHAT_LLAMA_MODEL` (default `llama3.2:1b`), or **Foundry** to use
+   `FOUNDRY_MEMORY_MODEL_DEPLOYMENT_NAME` (default `gpt-chat-latest`) in both
+   panels. Within a selection, both panels use identical instructions and model
+   settings; only session history differs. Local runs use temperature 0.
+   Local sessions replay the messages; Foundry sessions carry the previous
+   response ID so the service can retrieve prior turns.
+   Runtime conversations are separate from each other and from screen 3.
+   Each panel has a "Look under the hood" button showing the selected runtime's
+   exact code and shared instructions. Foundry sends prompts to Azure and incurs
+   costs; it requires the login and deployment configuration below.
 5. Long-term memory: a chat with a context provider
    (`maf\memory_long_term_agent.py`) that stores the user's favourite colour,
    shows the stored value live, keeps it across "New session", and clears it with
@@ -60,6 +142,29 @@ not a standalone browser app.
    it is not a model's private reasoning or a general-purpose skill-selection
    engine. No Azure access is needed.
 
+### Concise replies and German memory example (screens 3 and 4)
+
+Both screens share instructions to respond briefly in the latest message's
+language, preserve user-provided names/places, and admit when a personal fact is
+not present in the available conversation. These are model instructions, not
+output truncation or a guarantee of factual accuracy.
+
+For screen 4, select **Foundry** for the more reliable German walkthrough with
+the deployed `gpt-chat-latest` model. In **each** panel, click **New chat**, send
+`Ich wohne in Nürnberg`, then send `Wo wohne ich?`. The session panel should
+answer Nürnberg; the stateless panel should say it does not know, because the
+previous message is not sent on its second call. **New chat** resets only the
+selected panel/runtime. Switching runtimes restores that runtime's conversation
+without copying local messages to Foundry.
+
+Small local models can invent a city or fail to use genuine history. The installed
+`llama3.2:1b` also guessed incorrectly in a German stateless comparison, so
+switching from Phi to that model is not a reliable fix. A model response alone
+does not prove that session history was lost; history forwarding is covered by
+the automated tests (including Foundry continuation IDs). Do not compare one local
+panel with one cloud panel, since that would confound model quality with memory
+behavior.
+
 ### Incident-triage skill demo (screen 8)
 
 The example skill's discovery metadata is its YAML `name` and `description`;
@@ -70,7 +175,7 @@ Framework agent. The trace records the selection, matched terms, file load (or
 reuse), and the skill path. **Show actual SKILL.md** displays the file used.
 This is an observable runtime trace, not hidden chain-of-thought.
 Both modes on this screen use local Ollama: they compare skill availability,
-not local versus Foundry. The Foundry agents on screens 3 and 7 do not load this
+not local versus Foundry. The Foundry agents on screens 3, 4, and 7 do not load this
 skill.
 
 Select **Skill available** and click **Run sample conversation**:
@@ -85,7 +190,7 @@ The skill asks the agent to separate facts, hypotheses, and unknowns; rank expla
 
 For a controlled comparison, run the sample in **Skill available**, then select **Baseline · skill unavailable** and run it again. Each mode has an independent conversation; the sample button resets the selected one first. Both use `OLLAMA_MODEL` (default `phi3:3.8b`) through local Ollama, with temperature 0. Baseline mode exposes no skill candidate or skill instructions. A baseline model can still produce some of the same good advice: compare observable outputs rather than assuming it must fail. Selection uses documented keyword matching, so the trace is deterministic; a production runtime may select skills differently.
 
-Local setup is the existing Ollama setup above. Start Ollama with the configured model available, reload the extension, open screen 8, and run the sample. For an implementation smoke test, run:
+Local setup is the Ollama setup below. Start Ollama with the configured model available, start the local app (or reload the extension), open screen 8, and run the sample. For an implementation smoke test, run:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s .\maf -p "test_incident_triage_agent.py"
@@ -111,7 +216,7 @@ run the command without `--model`. An explicit `--model` takes precedence.
 This creates a version of `agents-under-the-hood-tools` with both tool schemas;
 it does not deploy a model or alter `.env`. Add the printed
 `FOUNDRY_TOOLS_AGENT_NAME` and `FOUNDRY_TOOLS_AGENT_VERSION` to `maf\.env`
-and reload the extension. Rerunning setup deliberately creates a new version.
+and restart the app (or reload the extension). Rerunning setup deliberately creates a new version.
 Missing settings and service/authentication failures are shown in the chat,
 never silently replaced with a local response.
 
@@ -138,59 +243,89 @@ Run the agent and model-configuration tests with the configured virtual environm
 .\.venv\Scripts\python.exe -m unittest discover -s .\maf -p "test_*.py"
 ```
 
-The source lives at the project root deliberately. Copilot discovers project
+The optional canvas source lives at the project root deliberately. Copilot discovers project
 extensions under `.github\extensions\`, so this copy does not register a second
 provider. The existing installation at
 `C:\Users\pauld\.copilot\extensions\agents-under-the-hood`
 serves its installed snapshot. Editing source here does not update it automatically;
-to test changes, copy the updated `index.html`, `extension.mjs`, and Python
-modules there, copy `.github\skills\incident-triage\SKILL.md` to the matching
+to test canvas changes, copy the updated `index.html`, `extension.mjs`,
+`server.mjs`, `components.mjs`, and Python modules there, copy
+`.github\skills\incident-triage\SKILL.md` to the matching
 path under the installed extension, preserve its `.venv` and private `maf\.env`,
-then reload extensions and reopen the canvas.
+then reload extensions and reopen the canvas. The standalone app runs directly
+from this checkout and does not require copying anything.
 
-## Setup (Windows PowerShell)
+## Model and Foundry configuration
 
-Use a Python version supported by the pinned dependencies in
-`maf\requirements.txt`. From the extension source directory:
+Python virtual environments are not tracked by Git. `maf\.env` is private and
+ignored; `.env.example` is the shareable template. Do not commit tenant/project
+configuration or credentials.
+
+### Authenticate to Foundry
+
+Screens 3 and 4's Microsoft Foundry chats use Azure Identity's
+`AzureCliCredential`. Sign in to Azure CLI **as the same Windows user running
+the app**, using the tenant configured as `AZURE_TENANT_ID` in `maf\.env`:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r .\maf\requirements.txt
-# Only create .env if it does not already exist:
-if (-not (Test-Path .\maf\.env)) {
-    Copy-Item .\maf\.env.example .\maf\.env
-}
+az login --tenant <your-tenant-id>
+az account show --query "{user:user.name, tenant:tenantId, subscription:name}" -o table
 ```
 
-The server expects `.venv\Scripts\python.exe` beside `extension.mjs`.
-Virtual environments are not copied or tracked. A private `maf\.env` was
-preserved during migration and is ignored by Git; `.env.example` is trackable.
-Do not commit tenant/project configuration or credentials.
+The second command confirms which account and tenant Azure CLI will use. Restart
+the local app after signing in, then retry the Foundry chat. Do not copy an
+access token into the app or `.env`.
 
-For local chat, install Ollama, then run `ollama pull phi3:3.8b` and ensure
-Ollama is serving at `http://localhost:11434`.
+Signing in supplies an identity token; it **does not grant access** to the
+Foundry project or model. If the chat returns `403` or `PermissionDeniedError`,
+verify that the signed-in identity has the required Foundry project and model
+inference permissions, and that `FOUNDRY_PROJECT_ENDPOINT` points to the intended
+project. A `403` alone cannot distinguish missing permissions from every other
+access restriction.
+
+If the installed canvas works but the standalone app fails, compare
+`FOUNDRY_PROJECT_ENDPOINT` in each copy's `maf\.env`. They are separate files:
+the standalone app does not inherit the installed extension's configuration.
+Use the project endpoint containing the intended model deployment, then restart
+the app. A valid login cannot compensate for pointing at a different project
+where the deployment or inference permissions are missing.
 
 For Foundry chat, set `AZURE_TENANT_ID` and `FOUNDRY_PROJECT_ENDPOINT` in
-`maf\.env`, then run `az login --tenant <your-tenant-id>`. The default deployment
-is `MAI-Thinking-1`; `FOUNDRY_MODEL_DEPLOYMENT_NAME` can override it. Existing
-environment variables take precedence over `.env` values.
+`maf\.env`. The default deployment is `MAI-Thinking-1`;
+`FOUNDRY_MODEL_DEPLOYMENT_NAME` can override it. Existing environment variables
+take precedence over `.env` values.
 
 Model names can be edited in `maf\.env`:
 
 | Variable | Default | Used by |
 |---|---|---|
 | `FOUNDRY_MODEL_DEPLOYMENT_NAME` | `MAI-Thinking-1` | Foundry chat |
-| `OLLAMA_MODEL` | `phi3:3.8b` | Local chat and all memory demos |
+| `FOUNDRY_MEMORY_MODEL_DEPLOYMENT_NAME` | `gpt-chat-latest` | Screen 4 Foundry memory comparison; must be an existing deployment in the configured project |
+| `OLLAMA_MODEL` | `phi3:3.8b` | Local Phi chat, memory, and skills demos |
+| `OLLAMA_CHAT_LLAMA_MODEL` | `llama3.2:1b` | Local Llama choice on screens 3 and 4 |
 | `OLLAMA_TOOLS_MODEL` | `llama3.2:1b` | Local calculator and tools demos |
 | `FOUNDRY_TOOLS_MODEL_DEPLOYMENT_NAME` | None; supply an existing Azure OpenAI deployment | Foundry tools setup |
 
 Pull any newly selected local model with `ollama pull <model-name>`.
-Restart the Python bridge (reload the extension) after changing chat models.
+Restart the app (or reload the extension) after changing chat models.
 For Foundry tools, changing the model setting alone does not modify an existing
 saved agent: rerun `setup_foundry_tools.py`, update
-`FOUNDRY_TOOLS_AGENT_VERSION` to the printed version, then reload.
+`FOUNDRY_TOOLS_AGENT_VERSION` to the printed version, then restart.
 These settings apply to the copy of `maf\.env` beside the running bridge;
 the separately installed extension does not read this repository's `.env`.
+
+### Development checks
+
+```powershell
+npm test
+.\.venv\Scripts\python.exe -m unittest discover -s .\maf -p "test_*.py"
+```
+
+The dependency-free Node tests cover the exact eight-screen HTML, reveal/SSE
+state, code views, HTTP request forwarding, streamed chat/tool/skill events,
+backend errors, and standalone startup. They stub agent responses and do not
+contact Ollama or Azure. The Python tests exercise agent behavior with simulated
+model/service responses; live chats require your configured model services.
 
 ### Foundry conversation tracing with Application Insights
 
