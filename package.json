@@ -1,0 +1,14 @@
+{
+  "name": "agents-under-the-hood",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Eight-screen local web application and Copilot canvas for exploring AI agents.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node app.mjs",
+    "test": "node --test"
+  }
+}

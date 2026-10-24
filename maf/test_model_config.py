@@ -14,8 +14,13 @@ class ModelConfigurationTests(unittest.TestCase):
     def test_agents_use_defaults_and_environment_overrides(self):
         cases = [
             ("local_agent", "OLLAMA_MODEL", "phi3:3.8b"),
+            ("local_llama_agent", "OLLAMA_CHAT_LLAMA_MODEL", "llama3.2:1b"),
             ("memory_stateless_agent", "OLLAMA_MODEL", "phi3:3.8b"),
             ("memory_session_agent", "OLLAMA_MODEL", "phi3:3.8b"),
+            ("memory_llama_stateless_agent", "OLLAMA_CHAT_LLAMA_MODEL", "llama3.2:1b"),
+            ("memory_llama_session_agent", "OLLAMA_CHAT_LLAMA_MODEL", "llama3.2:1b"),
+            ("memory_foundry_stateless_agent", "FOUNDRY_MEMORY_MODEL_DEPLOYMENT_NAME", "gpt-chat-latest"),
+            ("memory_foundry_session_agent", "FOUNDRY_MEMORY_MODEL_DEPLOYMENT_NAME", "gpt-chat-latest"),
             ("memory_long_term_agent", "OLLAMA_MODEL", "phi3:3.8b"),
             ("calculator_agent", "OLLAMA_TOOLS_MODEL", "llama3.2:1b"),
             ("foundry_agent", "FOUNDRY_MODEL_DEPLOYMENT_NAME", "MAI-Thinking-1"),
@@ -28,7 +33,7 @@ class ModelConfigurationTests(unittest.TestCase):
                         env[variable] = override
                     target = (
                         "agent_framework.foundry.FoundryChatClient"
-                        if module == "foundry_agent" else "agent_framework.ollama.OllamaChatClient"
+                        if "foundry" in module else "agent_framework.ollama.OllamaChatClient"
                     )
                     with patch.dict(os.environ, env, clear=True), patch(
                         target
@@ -90,13 +95,17 @@ class BridgeConfigurationTests(unittest.IsolatedAsyncioTestCase):
         bridge["handle"].__globals__["send"] = output.append
         with patch.dict(os.environ, {
             "OLLAMA_MODEL": "custom-chat",
+            "OLLAMA_CHAT_LLAMA_MODEL": "custom-local-llama",
             "OLLAMA_TOOLS_MODEL": "custom-tools",
             "FOUNDRY_MODEL_DEPLOYMENT_NAME": "custom-foundry",
+            "FOUNDRY_MEMORY_MODEL_DEPLOYMENT_NAME": "custom-memory",
             "AZURE_TENANT_ID": "not-public",
         }, clear=True):
             await bridge["handle"]({"id": 7, "type": "models"})
         self.assertEqual(json.loads(output[0]["delta"]), {
-            "local": "custom-chat", "foundry": "custom-foundry", "tools": "custom-tools",
+            "local": "custom-chat", "local_llama": "custom-local-llama",
+            "foundry": "custom-foundry", "tools": "custom-tools",
+            "memory_foundry": "custom-memory",
         })
         self.assertEqual(output[-1], {"id": 7, "done": True})
 

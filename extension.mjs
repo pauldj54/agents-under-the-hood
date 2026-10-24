@@ -1,259 +1,8 @@
-﻿// Extension: agents-under-the-hood
-// Guided showcase of how AI agents work under the hood.
-// index.html is re-read on every request, so UI edits only need a canvas re-open.
-
-import { createServer } from "node:http";
-import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { joinSession, createCanvas, CanvasError } from "@github/copilot-sdk/extension";
-import { COMPONENTS, scramble } from "./components.mjs";
+import { COMPONENTS } from "./components.mjs";
+import { freshCards, snapshot, setStage, broadcast, startServer } from "./server.mjs";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const instances = new Map(); // instanceId -> { server, url, cards: Map<id,{stage,scrambled}>, clients:Set }
-
-// Python MAF bridge: one long-lived process, JSON lines over stdio.
-const PYTHON = join(HERE, ".venv", "Scripts", "python.exe");
-let bridge = null;
-let nextId = 1;
-const pending = new Map(); // id -> { onDelta, resolve }
-
-function getBridge() {
-    if (bridge) return bridge;
-    bridge = spawn(PYTHON, ["bridge.py"], { cwd: join(HERE, "maf"), stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-    let buf = "";
-    bridge.stdout.setEncoding("utf8");
-    bridge.stdout.on("data", (chunk) => {
-        buf += chunk;
-        let nl;
-        while ((nl = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, nl);
-            buf = buf.slice(nl + 1);
-            if (!line.trim()) continue;
-            const msg = JSON.parse(line);
-            const p = pending.get(msg.id);
-            if (!p) continue;
-            if (msg.delta) p.onDelta(msg.delta);
-            if (msg.tool_event) p.onTool(msg.tool_event);
-            if (msg.done || msg.error) { pending.delete(msg.id); p.resolve(msg.error); }
-        }
-    });
-    bridge.stderr.on("data", () => {});
-    const fail = (err) => {
-        for (const p of pending.values()) p.resolve(`Python bridge stopped: ${err}`);
-        pending.clear();
-        bridge = null;
-    };
-    bridge.on("error", (e) => fail(e.message));
-    bridge.on("exit", (code) => fail(`exit code ${code}`));
-    return bridge;
-}
-
-function callBridge(req, onDelta = () => {}, onTool = () => {}) {
-    return new Promise((resolve) => {
-        const id = nextId++;
-        pending.set(id, { onDelta, onTool, resolve });
-        getBridge().stdin.write(JSON.stringify({ ...req, id }) + "\n");
-    });
-}
-
-process.on("exit", () => bridge?.kill());
-
-async function readJson(req) {
-    let body = "";
-    for await (const c of req) body += c;
-    return body ? JSON.parse(body) : {};
-}
-
-const SNIPPETS = {
-    local: "local_agent.py",
-    foundry: "foundry_agent.py",
-    stateless: "memory_stateless_agent.py",
-    session: "memory_session_agent.py",
-    longterm: "memory_long_term_agent.py",
-    calculator: "calculator_agent.py",
-    "tools-local": "calculator_agent.py",
-    "tools-foundry": "foundry_tools_agent.py",
-};
-
-function freshCards() {
-    return new Map(COMPONENTS.map((c) => [c.id, { stage: 0, scrambled: [] }]));
-}
-
-function snapshot(inst) {
-    return {
-        cards: COMPONENTS.map((c) => {
-            const s = inst.cards.get(c.id);
-            return { ...c, letter: c.name[0].toUpperCase(), stage: s.stage, scrambled: s.scrambled };
-        }),
-    };
-}
-
-function setStage(inst, id, stage) {
-    const s = inst.cards.get(id);
-    if (!s) throw new CanvasError("unknown_component", `Unknown component '${id}'`);
-    s.stage = stage;
-    if (stage === 1) s.scrambled = scramble(COMPONENTS.find((c) => c.id === id).name);
-}
-
-function broadcast(inst) {
-    const data = `data: ${JSON.stringify(snapshot(inst))}\n\n`;
-    for (const res of inst.clients) res.write(data);
-}
-
-function json(res, body) {
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify(body));
-}
-
-async function startServer(inst) {
-    const server = createServer(async (req, res) => {
-        try {
-            const url = new URL(req.url, "http://localhost");
-            if (req.method === "GET" && url.pathname === "/") {
-                res.setHeader("Content-Type", "text/html; charset=utf-8");
-                res.setHeader("Cache-Control", "no-store");
-                return res.end(await readFile(join(HERE, "index.html"), "utf8"));
-            }
-            if (url.pathname === "/events") {
-                res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-                res.write(`data: ${JSON.stringify(snapshot(inst))}\n\n`);
-                inst.clients.add(res);
-                req.on("close", () => inst.clients.delete(res));
-                return;
-            }
-            if (req.method === "POST" && url.pathname.startsWith("/api/advance/")) {
-                const id = decodeURIComponent(url.pathname.slice("/api/advance/".length));
-                const s = inst.cards.get(id);
-                if (!s) { res.statusCode = 404; return res.end(); }
-                setStage(inst, id, (s.stage + 1) % 3);
-                broadcast(inst);
-                return json(res, snapshot(inst));
-            }
-            if (req.method === "POST" && url.pathname === "/api/reset") {
-                inst.cards = freshCards();
-                broadcast(inst);
-                return json(res, snapshot(inst));
-            }
-            if (req.method === "POST" && url.pathname === "/api/chat") {
-                const { model, message } = await readJson(req);
-                res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
-                const err = await callBridge({ type: "chat", model, message }, (t) => res.write(t));
-                if (err) res.write(`\n⚠️ ${err}`);
-                return res.end();
-            }
-            if (req.method === "POST" && url.pathname === "/api/tools/chat") {
-                const { message, model = "calculator" } = await readJson(req);
-                if (!["calculator", "tools-local", "tools-foundry"].includes(model)) {
-                    res.statusCode = 400;
-                    return json(res, { error: "Select a valid tools runtime." });
-                }
-                if (typeof message !== "string" || !message.trim()) {
-                    res.statusCode = 400;
-                    return json(res, { error: "A message is required." });
-                }
-                res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" });
-                const emit = (event) => res.write(JSON.stringify(event) + "\n");
-                const err = await callBridge({ type: "chat", model, message },
-                    (text) => emit({ text }), (event) => emit({ tool_event: event }));
-                emit(err ? { error: err } : { done: true });
-                return res.end();
-            }
-            if (req.method === "POST" && url.pathname === "/api/skills/chat") {
-                const { message, mode } = await readJson(req);
-                if (!["skill", "baseline"].includes(mode)) {
-                    res.statusCode = 400;
-                    return json(res, { error: "Select a valid incident demo mode." });
-                }
-                if (typeof message !== "string" || !message.trim()) {
-                    res.statusCode = 400;
-                    return json(res, { error: "A message is required." });
-                }
-                res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" });
-                const emit = (event) => res.write(JSON.stringify(event) + "\n");
-                const err = await callBridge(
-                    { type: "skill_chat", mode, message },
-                    (text) => emit({ text }),
-                    (event) => emit({ tool_event: event }),
-                );
-                emit(err ? { error: err } : { done: true });
-                return res.end();
-            }
-            if (req.method === "POST" && url.pathname === "/api/skills/reset") {
-                const { mode } = await readJson(req);
-                if (!["skill", "baseline"].includes(mode)) {
-                    res.statusCode = 400;
-                    return json(res, { error: "Select a valid incident demo mode." });
-                }
-                const err = await callBridge({ type: "skill_reset", mode });
-                return json(res, { ok: !err, error: err });
-            }
-            if (req.method === "POST" && url.pathname === "/api/chat/reset") {
-                const { model } = await readJson(req);
-                const err = await callBridge({ type: "reset", model });
-                return json(res, { ok: !err, error: err });
-            }
-            if (req.method === "GET" && url.pathname === "/api/models") {
-                let text = "";
-                const err = await callBridge({ type: "models" }, (t) => (text += t));
-                if (err) {
-                    res.statusCode = 500;
-                    return json(res, { error: err });
-                }
-                res.setHeader("Cache-Control", "no-store");
-                return json(res, JSON.parse(text));
-            }
-            if (req.method === "POST" && url.pathname === "/api/memory") {
-                const { action } = await readJson(req);
-                let text = "";
-                const err = await callBridge({ type: action === "forget" ? "forget" : "memory", model: "longterm" }, (t) => (text += t));
-                if (err) return json(res, { error: err });
-                if (action === "forget") return json(res, { favourite_colour: null });
-                return json(res, JSON.parse(text));
-            }
-            if (req.method === "GET" && url.pathname === "/api/snippet") {
-                if (url.searchParams.get("model") === "incident-skill") {
-                    const code = await readFile(join(HERE, ".github", "skills", "incident-triage", "SKILL.md"), "utf8");
-                    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-                    return res.end(code);
-                }
-                const file = SNIPPETS[url.searchParams.get("model")];
-                res.setHeader("Content-Type", "text/plain; charset=utf-8");
-                if (!file) return res.end("# Microsoft Foundry snippet: coming in the next iteration.");
-                const code = await readFile(join(HERE, "maf", file), "utf8");
-                const section = url.searchParams.get("section");
-                if (url.searchParams.get("model") === "tools-foundry" && ["binding", "definition"].includes(section)) {
-                    const start = code.indexOf("def prompt_definition(");
-                    const end = code.indexOf("\nagent:", start);
-                    if (start < 0 || end < 0) throw new Error("Foundry tool binding snippet was not found.");
-                    if (section === "binding") return res.end(code.slice(start, end).trim());
-                    const calculator = await readFile(join(HERE, "maf", "calculator_agent.py"), "utf8");
-                    return res.end(
-                        "# Web search is a hosted Foundry tool; there is no local search function.\n"
-                        + code.slice(start, code.indexOf("\ndef create_agent(", start)).trim()
-                        + "\n\n# Calculator implementation runs locally:\n"
-                        + calculator.slice(calculator.indexOf("def calculate("), calculator.indexOf("\nagent = Agent(")).trim()
-                    );
-                }
-                if (["calculator", "tools-local"].includes(url.searchParams.get("model")) && ["binding", "definition"].includes(section)) {
-                    const start = code.indexOf(section === "binding" ? "agent = Agent(" : "def calculate(");
-                    const end = code.indexOf(section === "binding" ? "\nsession =" : "\nagent = Agent(", start);
-                    if (start < 0 || end < 0) throw new Error(`Calculator ${section} snippet was not found.`);
-                    return res.end(code.slice(start, end).trim());
-                }
-                return res.end(code);
-            }
-            res.statusCode = 404;
-            res.end();
-        } catch (err) {
-            res.statusCode = 500;
-            res.end(String(err));
-        }
-    });
-    await new Promise((r) => server.listen(0, "127.0.0.1", r));
-    return { server, url: `http://127.0.0.1:${server.address().port}/` };
-}
+const instances = new Map();
 
 function getInst(instanceId) {
     const inst = instances.get(instanceId);
@@ -290,7 +39,12 @@ await joinSession({
                     handler: (ctx) => {
                         const inst = getInst(ctx.instanceId);
                         const ids = ctx.input?.componentId ? [ctx.input.componentId] : componentIds;
-                        for (const id of ids) setStage(inst, id, ctx.input.stage);
+                        for (const id of ids) {
+                            if (!inst.cards.has(id)) {
+                                throw new CanvasError("unknown_component", `Unknown component '${id}'`);
+                            }
+                            setStage(inst, id, ctx.input.stage);
+                        }
                         broadcast(inst);
                         return snapshot(inst);
                     },
@@ -320,7 +74,7 @@ await joinSession({
                 if (!inst) return;
                 instances.delete(ctx.instanceId);
                 for (const res of inst.clients) res.end();
-                await new Promise((r) => inst.server.close(() => r()));
+                await new Promise((resolve) => inst.server.close(resolve));
             },
         }),
     ],

@@ -51,16 +51,23 @@ async def handle(req):
         if req["type"] == "models":
             send({"id": rid, "delta": json.dumps({
                 "local": os.getenv("OLLAMA_MODEL", "phi3:3.8b"),
+                "local_llama": os.getenv("OLLAMA_CHAT_LLAMA_MODEL", "llama3.2:1b"),
                 "foundry": os.getenv("FOUNDRY_MODEL_DEPLOYMENT_NAME", "MAI-Thinking-1"),
                 "tools": os.getenv("OLLAMA_TOOLS_MODEL", "llama3.2:1b"),
+                "memory_foundry": os.getenv("FOUNDRY_MEMORY_MODEL_DEPLOYMENT_NAME", "gpt-chat-latest"),
             })})
             send({"id": rid, "done": True})
             return
         modules = {
             "local": "local_agent",
+            "local-llama": "local_llama_agent",
             "foundry": "foundry_agent",
             "stateless": "memory_stateless_agent",
             "session": "memory_session_agent",
+            "memory-llama-stateless": "memory_llama_stateless_agent",
+            "memory-llama-session": "memory_llama_session_agent",
+            "memory-foundry-stateless": "memory_foundry_stateless_agent",
+            "memory-foundry-session": "memory_foundry_session_agent",
             "longterm": "memory_long_term_agent",
             "calculator": "calculator_agent",
             "tools-local": "local_tools_agent",

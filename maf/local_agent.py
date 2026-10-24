@@ -2,6 +2,7 @@ import os
 
 from agent_framework import Agent
 from agent_framework.ollama import OllamaChatClient
+from chat_instructions import CHAT_INSTRUCTIONS
 
 # 1. Connect to the LLM running locally in Ollama
 client = OllamaChatClient(
@@ -13,7 +14,8 @@ client = OllamaChatClient(
 agent = Agent(
     client=client,
     name="LocalPhi",
-    instructions="You are a friendly assistant.",
+    instructions=CHAT_INSTRUCTIONS,
+    default_options={"temperature": 0},
 )
 
 # 3. A session keeps the short-term memory of the conversation
