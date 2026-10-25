@@ -1,9 +1,21 @@
 <!doctype html>
-<html>
+<html lang="en" data-theme="default">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Agents Under the Hood</title>
+<script id="theme-restore">
+  const themeIds = ["default", "agents-im-weggla", "halloween"];
+  const themeStorageKey = "agents-under-the-hood.theme";
+  try {
+    const savedTheme = localStorage.getItem(themeStorageKey);
+    if (themeIds.includes(savedTheme)) document.documentElement.dataset.theme = savedTheme;
+  } catch (error) {
+    console.warn("Theme preference could not be read.", error);
+    document.documentElement.dataset.themeStorage = "unavailable";
+  }
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
 <style>
   * { box-sizing: border-box; }
   body {
@@ -205,6 +217,94 @@
     --color-focus-outline: var(--signal);
     --font-sans: "Segoe UI Variable", "Segoe UI", sans-serif;
     --font-mono: "Cascadia Code", Consolas, monospace;
+    --display-font: Bahnschrift, "Segoe UI Variable", "Segoe UI", sans-serif;
+    --signal-hover: #87eadb;
+    --code-background: #121b24;
+    --placeholder: #8795a5;
+    --syntax-keyword: #f39b85;
+    --syntax-string: #9ed8e8;
+    --syntax-comment: #91a39b;
+    --syntax-function: #c5b2ed;
+    --llm-fill: #a371f7;
+  }
+  :root[data-theme="agents-im-weggla"] {
+    --ink: #0a0710;
+    --panel: #17121c;
+    --panel-raised: #261b2a;
+    --paper: #fbf7f4;
+    --muted: #c9c1bd;
+    --rule: #674051;
+    --signal: #ff5c9c;
+    --signal-hover: #ff91bb;
+    --brass: #ffcf00;
+    --blue: #ffc1d8;
+    --code-background: #100c16;
+    --placeholder: #b8a6b1;
+    --font-sans: Inter, "Segoe UI", sans-serif;
+    --display-font: "Space Grotesk", Inter, sans-serif;
+    --llm-fill: var(--signal);
+  }
+  :root[data-theme="halloween"] {
+    --ink: #180f23;
+    --panel: #251832;
+    --panel-raised: #32213f;
+    --paper: #fff2df;
+    --muted: #beaccb;
+    --rule: #705579;
+    --signal: #ffb15c;
+    --signal-hover: #ffce94;
+    --brass: #c9a7ff;
+    --blue: #d6baff;
+    --code-background: #1d1328;
+    --placeholder: #beaccb;
+    --syntax-keyword: #ffb15c;
+    --syntax-string: #c4e4b1;
+    --syntax-comment: #beaccb;
+    --syntax-function: #d6baff;
+    --display-font: Georgia, "Times New Roman", serif;
+    --llm-fill: var(--signal);
+  }
+  :root:not([data-theme="default"]) body {
+    background: radial-gradient(ellipse at 90% 0%, color-mix(in srgb, var(--signal) 10%, transparent), transparent 55%), var(--ink);
+  }
+  :root[data-theme="agents-im-weggla"] .screen > header h1,
+  :root[data-theme="agents-im-weggla"] .s3-head h1 {
+    background: linear-gradient(110deg, #ff3483, #ff7a2f 55%, #ffcf00);
+    background-clip: text;
+    color: transparent;
+    width: fit-content;
+  }
+  :root[data-theme="halloween"] h1 { font-weight: 700; letter-spacing: -.025em; }
+  .theme-art { display: none; }
+  :root[data-theme="halloween"] .theme-art {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 1320px;
+    margin: 36px auto 16px;
+    color: var(--signal);
+  }
+  .theme-art svg {
+    display: block;
+    width: 78px;
+    height: 64px;
+    flex: none;
+  }
+  .theme-companions { display: flex; align-items: center; gap: 12px; }
+  :root[data-theme="halloween"] .screen > header,
+  :root[data-theme="halloween"] .s3-head { margin-top: 0; }
+  .nav-actions { display: flex; align-items: center; justify-self: end; gap: 18px; }
+  .theme-picker { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+  .theme-picker select { max-width: 185px; min-height: 40px; font-size: 13px; }
+  .theme-status { max-width: 1320px; margin: 8px auto 0; color: var(--brass); font-size: 13px; }
+  .theme-status:empty { display: none; }
+  @media (max-width: 760px) {
+    .navbar .nav-actions { display: contents; }
+    .navbar .theme-picker { grid-column: 1 / -1; justify-self: end; margin-top: 10px; }
+  }
+  @media (forced-colors: active) {
+    :root[data-theme="agents-im-weggla"] .screen > header h1,
+    :root[data-theme="agents-im-weggla"] .s3-head h1 { background: none; color: CanvasText; }
   }
   html { min-width: 320px; }
   body {
@@ -217,7 +317,7 @@
     line-height: 1.55;
   }
   h1, .name, .letter {
-    font-family: Bahnschrift, "Segoe UI Variable", "Segoe UI", sans-serif;
+    font-family: var(--display-font);
     letter-spacing: -.035em;
   }
   h1 {
@@ -259,7 +359,7 @@
     border-bottom: 1px solid var(--rule);
     background: var(--ink);
   }
-  .navbar .navbtn { width: fit-content; }
+  .navbar .navbtn { width: fit-content; white-space: nowrap; flex-shrink: 0; }
   .navbar #back { justify-self: start; }
   .navbar #next { justify-self: end; }
   .navbtn {
@@ -272,14 +372,14 @@
     font-weight: 650;
   }
   .navbtn:hover:not(:disabled) {
-    border-color: #87eadb;
-    background: #87eadb;
+    border-color: var(--signal-hover);
+    background: var(--signal-hover);
     color: var(--ink);
   }
   .navbar button.navbtn:disabled {
     border-color: var(--rule);
     background: var(--panel);
-    color: #8795a5;
+    color: var(--placeholder);
     opacity: 1;
     pointer-events: none;
   }
@@ -437,7 +537,7 @@
     background: var(--ink);
     color: var(--paper);
   }
-  .composer textarea::placeholder { color: #8795a5; }
+  .composer textarea::placeholder { color: var(--placeholder); }
   select {
     border-color: var(--rule);
     border-radius: 3px;
@@ -449,13 +549,13 @@
   pre.code, .incident-trace pre {
     border: 1px solid var(--rule);
     border-radius: 3px;
-    background: #121b24;
+    background: var(--code-background);
     color: var(--paper);
   }
-  .code .k { color: #f39b85; }
-  .code .s { color: #9ed8e8; }
-  .code .c { color: #91a39b; }
-  .code .f { color: #c5b2ed; }
+  .code .k { color: var(--syntax-keyword); }
+  .code .s { color: var(--syntax-string); }
+  .code .c { color: var(--syntax-comment); }
+  .code .f { color: var(--syntax-function); }
   .code .hl { background: color-mix(in srgb, var(--brass) 25%, transparent); }
   .file { color: var(--muted); }
   .memcard {
@@ -474,6 +574,7 @@
   @media (max-width: 860px) {
     body { padding: 16px 18px 32px; }
     .screen > header { margin-top: 26px; }
+    :root[data-theme="halloween"] .theme-art { margin-top: 26px; }
     .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .s3, .s4 { min-height: 0; }
     .s3 .panel, .s4 .panel { min-height: 420px; }
@@ -510,7 +611,66 @@
       <span id="pos" aria-live="polite"></span>
       <span class="progress-track" aria-hidden="true"><span id="progressFill"></span></span>
     </div>
-    <button class="navbtn" id="next">Next →</button>
+    <div class="nav-actions">
+      <button class="navbtn" id="next">Next →</button>
+      <label class="theme-picker" for="theme">
+        Theme
+        <select id="theme">
+          <option value="default">Default</option>
+          <option value="agents-im-weggla">Agents im Weggla</option>
+          <option value="halloween">Halloween</option>
+        </select>
+      </label>
+    </div>
+  </div>
+  <p class="theme-status" id="themeStatus" role="status"></p>
+  <script id="theme-controls">
+    const themeSelect = document.getElementById("theme");
+    const themeStatus = document.getElementById("themeStatus");
+    themeSelect.value = document.documentElement.dataset.theme;
+    if (document.documentElement.dataset.themeStorage === "unavailable") {
+      themeStatus.textContent = "Saved theme could not be read. You can still choose a theme for this visit.";
+    }
+    themeSelect.addEventListener("change", () => {
+      if (!themeIds.includes(themeSelect.value)) return;
+      document.documentElement.dataset.theme = themeSelect.value;
+      try {
+        localStorage.setItem(themeStorageKey, themeSelect.value);
+        themeStatus.textContent = "";
+      } catch (error) {
+        console.warn("Theme preference could not be saved.", error);
+        themeStatus.textContent = "Theme changed for this visit, but could not be saved. Allow browser storage to remember it.";
+      }
+    });
+  </script>
+
+  <div class="theme-art" aria-hidden="true">
+      <svg class="theme-pumpkin" viewBox="0 0 90 74">
+        <path d="M45 17V6m0 0 9-3M21 38H8v14m61-14h13v14" fill="none" stroke="var(--brass)" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="8" cy="57" r="4" fill="var(--brass)"/>
+        <circle cx="82" cy="57" r="4" fill="var(--brass)"/>
+        <path d="M45 20C15 8 7 37 18 57c7 13 18 11 27 9 9 2 20 4 27-9C83 37 75 8 45 20Z" fill="currentColor"/>
+        <path d="M45 23c-15 0-18 31-6 40m6-40c15 0 18 31 6 40" fill="none" stroke="var(--ink)" stroke-opacity=".3" stroke-width="2"/>
+        <rect x="23" y="32" width="44" height="22" rx="8" fill="var(--ink)"/>
+        <path d="M31 43h6m16 0h6" stroke="var(--brass)" stroke-width="4" stroke-linecap="round"/>
+        <path d="m39 59 6 3 6-3" fill="none" stroke="var(--ink)" stroke-width="2"/>
+      </svg>
+      <span class="theme-companions">
+        <svg class="theme-bat" viewBox="0 0 90 74">
+          <path d="M45 27C34 5 19 12 6 8q7 12 1 26 15-5 20 12 10-3 18 16 8-19 18-16 5-17 20-12-6-14 1-26C70 12 56 5 45 27Z" fill="var(--brass)"/>
+          <path d="M34 31 35 17l10 9 10-9 1 14" fill="var(--brass)"/>
+          <path d="M36 34 17 22m19 16-9 8m27-12 19-12M54 38l9 8" fill="none" stroke="var(--ink)" stroke-opacity=".3" stroke-width="2"/>
+          <ellipse cx="45" cy="40" rx="11" ry="18" fill="var(--brass)"/>
+          <path d="M39 35h3m6 0h3" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"/>
+          <path d="m42 43 3 3 3-3" fill="none" stroke="var(--ink)" stroke-width="2"/>
+        </svg>
+        <svg class="theme-ghost" viewBox="0 0 90 74">
+          <path d="M45 9C29 9 21 20 21 37v28l12-7 12 8 12-8 12 7V37C69 20 61 9 45 9Z" fill="var(--paper)" stroke="var(--brass)" stroke-width="2" stroke-linejoin="round"/>
+          <rect x="29" y="28" width="32" height="20" rx="8" fill="var(--ink)"/>
+          <path d="M36 37h3m12 0h3" stroke="var(--brass)" stroke-width="4" stroke-linecap="round"/>
+          <ellipse cx="45" cy="53" rx="3" ry="4" fill="var(--ink)"/>
+        </svg>
+      </span>
   </div>
 
   <section class="screen">
@@ -564,7 +724,7 @@
         <!-- LLM head -->
         <g class="llm">
           <polygon points="700,52 708,30 716,52" fill="#7d55c7" />
-          <rect x="680" y="50" width="100" height="62" rx="20" fill="#a371f7" />
+          <rect x="680" y="50" width="100" height="62" rx="20" fill="var(--llm-fill)" />
           <circle cx="698" cy="72" r="5" fill="#fff" /><circle cx="699" cy="72" r="2.5" fill="#1f1235" />
           <text x="748" y="88" text-anchor="middle" font-size="22" font-weight="800" fill="#fff">LLM</text>
         </g>
@@ -1660,7 +1820,7 @@
   })();
 </script>
 <script>
-  const HUES = ["#51d6c2", "#51d6c2", "#51d6c2", "#51d6c2", "#51d6c2", "#51d6c2"];
+  const HUES = ["var(--signal)"];
   const grid = document.getElementById("grid");
   let state = null;
   let prev = {};
