@@ -172,7 +172,7 @@
   .memval.known { color: #a371f7; }
   .memval.flash { animation: memflash .8s ease; }
   #toolTrace, #cloudTrace { max-height: 260px; overflow: auto; }
-  #toolTrace pre + pre, #cloudTrace pre + pre { margin-top: 8px; }
+  #toolTrace .code-panel + .code-panel, #cloudTrace .code-panel + .code-panel { margin-top: 8px; }
   .tools-pane { overflow: auto; padding-bottom: 16px; }
   .tool-event { font-size: 12px; color: var(--text-color-muted, #8b949e); padding: 6px 12px; }
   .sources { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
@@ -180,7 +180,8 @@
   .tools-layout { grid-template-columns: 1.4fr 1fr 1fr; }
   #toolsHood.open, #cloudHood.open { padding: 12px; gap: 12px; overflow: hidden; }
   .tool-snippet { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
-  .tool-snippet pre.code { flex: 1; min-height: 0; overflow: auto; white-space: pre; word-break: normal; }
+  .tool-snippet > .code-panel { flex: 1; }
+  .tool-snippet pre.code { overflow: auto; white-space: pre; word-break: normal; }
   .tool-snippet .file { flex: none; }
   #toolsHood.open > .hood-controls, #cloudHood.open > .hood-controls { flex: none; }
   .incident-layout { grid-template-columns: 1.25fr 1fr; }
@@ -558,6 +559,23 @@
   .code .f { color: var(--syntax-function); }
   .code .hl { background: color-mix(in srgb, var(--brass) 25%, transparent); }
   .file { color: var(--muted); }
+  .code-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 6px; }
+  .code-panel > pre.code { flex: 1; min-height: 0; }
+  .code-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex: none; }
+  .code-title { display: none; margin-right: auto; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; text-align: left; }
+  .code-toggle { flex: none; min-width: 44px; min-height: 44px; }
+  .code-toggle:focus-visible, .code-panel > pre.code:focus-visible {
+    outline: 2px solid var(--signal); outline-offset: -2px;
+  }
+  html.code-expanded { overflow: hidden; }
+  .code-fullscreen {
+    position: fixed; inset: 0; margin: 0; padding: 12px;
+    width: 100vw; height: 100vh; height: 100dvh; max-width: none; max-height: none;
+    border: 0; background: var(--ink); color: var(--paper);
+  }
+  .code-fullscreen > .code-panel { width: 100%; height: 100%; }
+  .code-fullscreen .code-title { display: block; }
+  .code-fullscreen pre.code { white-space: pre; word-break: normal; }
   .memcard {
     border: 1px solid var(--rule);
     border-left: 3px solid var(--signal);
@@ -1008,6 +1026,89 @@
       </div>
     </div>
   </section>
+<dialog class="code-fullscreen" id="codeFullscreen" aria-label="Fullscreen code panel"></dialog>
+<script id="code-panel-controls">
+  const codeFullscreen = document.getElementById("codeFullscreen");
+  let expandedCode = null;
+
+  function enhanceCodePanels(root) {
+    for (const code of root.querySelectorAll("pre.code")) {
+      if (code.parentElement.classList.contains("code-panel")) continue;
+      const panel = document.createElement("div");
+      panel.className = "code-panel";
+      const toolbar = document.createElement("div");
+      toolbar.className = "code-toolbar";
+      const title = document.createElement("span");
+      title.className = "code-title";
+      title.textContent = code.getAttribute("aria-label")
+        || code.previousElementSibling?.textContent || "Code";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "code-toggle";
+      button.textContent = "Full screen";
+      button.setAttribute("aria-label", "View code fullscreen");
+      button.setAttribute("aria-haspopup", "dialog");
+      code.tabIndex = 0;
+      if (!code.hasAttribute("aria-label")) code.setAttribute("aria-label", title.textContent);
+      toolbar.append(title, button);
+      code.before(panel);
+      panel.append(toolbar, code);
+      button.addEventListener("click", () => {
+        if (expandedCode) {
+          codeFullscreen.close();
+          return;
+        }
+        const placeholder = document.createComment("Code panel position");
+        const scroll = { top: code.scrollTop, left: code.scrollLeft };
+        const scrollPositions = [];
+        for (let element = code; element; element = element.parentElement) {
+          scrollPositions.push({ element, top: element.scrollTop, left: element.scrollLeft });
+        }
+        panel.before(placeholder);
+        expandedCode = { panel, placeholder, button, scrollPositions };
+        codeFullscreen.append(panel);
+        button.textContent = "X";
+        button.setAttribute("aria-label", "Exit fullscreen");
+        button.setAttribute("aria-keyshortcuts", "Escape");
+        button.removeAttribute("aria-haspopup");
+        document.documentElement.classList.add("code-expanded");
+        codeFullscreen.showModal();
+        code.scrollTop = scroll.top;
+        code.scrollLeft = scroll.left;
+        button.focus({ preventScroll: true });
+      });
+    }
+  }
+
+  codeFullscreen.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
+    const button = codeFullscreen.querySelector("button");
+    const code = codeFullscreen.querySelector("pre.code");
+    if (event.shiftKey && document.activeElement === button) {
+      event.preventDefault();
+      code.focus();
+    } else if (!event.shiftKey && document.activeElement === code) {
+      event.preventDefault();
+      button.focus();
+    }
+  });
+
+  codeFullscreen.addEventListener("close", () => {
+    const { panel, placeholder, button, scrollPositions } = expandedCode;
+    placeholder.replaceWith(panel);
+    button.textContent = "Full screen";
+    button.setAttribute("aria-label", "View code fullscreen");
+    button.setAttribute("aria-haspopup", "dialog");
+    button.removeAttribute("aria-keyshortcuts");
+    document.documentElement.classList.remove("code-expanded");
+    expandedCode = null;
+    for (const { element, top, left } of scrollPositions) {
+      element.scrollTop = top;
+      element.scrollLeft = left;
+    }
+    if (button.isConnected) button.focus({ preventScroll: true });
+  });
+</script>
 <script>
   const screens = [...document.querySelectorAll(".screen")];
   const back = document.getElementById("back"), next = document.getElementById("next");
@@ -1152,6 +1253,7 @@
     $("hood").className = "hood open";
     $("hood").innerHTML = `<div class="file">${file}</div><pre class="code">${highlight(code)}</pre>
       <div><button id="hideBtn">Hide code</button></div>`;
+    enhanceCodePanels($("hood"));
     $("hideBtn").onclick = closeHood;
   }
 
@@ -1305,6 +1407,7 @@
       hood.className = "hood open";
       hood.innerHTML = `<div class="file">maf/${file} · the exact code running this chat</div><pre class="code">${highlight(code)}</pre>
         <div><button class="hideBtn">Hide code</button></div>`;
+      enhanceCodePanels(hood);
       hood.querySelector(".hideBtn").onclick = closeHood;
     }
 
@@ -1365,6 +1468,7 @@
             <pre class="code" tabindex="0" aria-label="Tool definition code">${highlight(definition)}</pre>
           </div>
           <div class="hood-controls"><button id="${prefix}Hide">Hide code</button></div>`;
+        enhanceCodePanels(hood);
         $("toolsHide").onclick = closeHood;
       } catch (err) {
         if (selected !== model()) return;
@@ -1425,6 +1529,7 @@
             pre.className = "code";
             pre.textContent = JSON.stringify(tool, null, 2);
             trace.appendChild(pre);
+            enhanceCodePanels(trace);
             if (runtime && tool.status !== "citation") {
               const log = document.createElement("div");
               log.className = "tool-event";
@@ -1705,6 +1810,7 @@
         code.className = "code";
         code.textContent = await response.text();
         target.replaceChildren(file, code);
+        enhanceCodePanels(target);
         target.classList.add("open");
         button.textContent = "Hide SKILL.md";
       } catch (error) {
@@ -1808,6 +1914,7 @@
         hood.className = "hood open";
         hood.innerHTML = `<div class="file">maf/memory_long_term_agent.py · the exact code running this chat</div><pre class="code">${highlight(await res.text())}</pre>
           <div><button id="ltHide">Hide code</button></div>`;
+        enhanceCodePanels(hood);
         $("ltHide").onclick = closeHood;
       } catch (err) {
         hood.textContent = "⚠️ Could not load code: " + err.message;
