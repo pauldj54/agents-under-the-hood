@@ -13,7 +13,7 @@ const PYTHON = process.env.PYTHON_EXECUTABLE || join(
 );
 let bridge = null;
 let nextId = 1;
-const pending = new Map(); // id -> { onDelta, resolve }
+const pending = new Map(); // id -> { onDelta, onTool, resolve }
 
 function getBridge() {
     if (bridge) return bridge;
@@ -61,14 +61,25 @@ function getBridge() {
     return child;
 }
 
-function defaultCallBridge(req, onDelta = () => {}, onTool = () => {}) {
+function defaultCallBridge(req, onDelta = () => {}, onTool = () => {}, signal) {
     return new Promise((resolve) => {
+        if (signal?.aborted) return resolve("Request cancelled.");
         const id = nextId++;
-        pending.set(id, { onDelta, onTool, resolve });
-        getBridge().stdin.write(JSON.stringify({ ...req, id }) + "\n", (err) => {
-            if (!err) return;
+        const child = getBridge();
+        const finish = (error) => {
+            signal?.removeEventListener("abort", cancel);
             pending.delete(id);
-            resolve(`Python bridge write failed: ${err.message}`);
+            resolve(error);
+        };
+        const cancel = () => {
+            finish("Request cancelled.");
+            child.stdin.write(JSON.stringify({ type: "cancel", id }) + "\n");
+        };
+        pending.set(id, { onDelta, onTool, resolve: finish });
+        signal?.addEventListener("abort", cancel, { once: true });
+        child.stdin.write(JSON.stringify({ ...req, id }) + "\n", (err) => {
+            if (!err) return;
+            finish(`Python bridge write failed: ${err.message}`);
         });
     });
 }
@@ -133,6 +144,16 @@ function json(res, body) {
 
 export async function startServer(inst, { port = 0, callBridge = defaultCallBridge } = {}) {
     const server = createServer(async (req, res) => {
+        const controller = new AbortController();
+        res.once("close", () => {
+            if (!res.writableEnded) controller.abort();
+        });
+        const invokeBridge = (request, onDelta = () => {}, onTool = () => {}) => callBridge(
+            request,
+            (text) => { if (!controller.signal.aborted) onDelta(text); },
+            (event) => { if (!controller.signal.aborted) onTool(event); },
+            controller.signal,
+        );
         try {
             const url = new URL(req.url, "http://localhost");
             // Local demos can invoke cloud tools: reject requests from other websites.
@@ -168,7 +189,8 @@ export async function startServer(inst, { port = 0, callBridge = defaultCallBrid
             if (req.method === "POST" && url.pathname === "/api/chat") {
                 const { model, message } = await readJson(req);
                 res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
-                const err = await callBridge({ type: "chat", model, message }, (t) => res.write(t));
+                const err = await invokeBridge({ type: "chat", model, message }, (t) => res.write(t));
+                if (controller.signal.aborted) return;
                 if (err) res.write(`\n⚠️ ${err}`);
                 return res.end();
             }
@@ -184,8 +206,9 @@ export async function startServer(inst, { port = 0, callBridge = defaultCallBrid
                 }
                 res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" });
                 const emit = (event) => res.write(JSON.stringify(event) + "\n");
-                const err = await callBridge({ type: "chat", model, message },
+                const err = await invokeBridge({ type: "chat", model, message },
                     (text) => emit({ text }), (event) => emit({ tool_event: event }));
+                if (controller.signal.aborted) return;
                 emit(err ? { error: err } : { done: true });
                 return res.end();
             }
@@ -201,11 +224,12 @@ export async function startServer(inst, { port = 0, callBridge = defaultCallBrid
                 }
                 res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" });
                 const emit = (event) => res.write(JSON.stringify(event) + "\n");
-                const err = await callBridge(
+                const err = await invokeBridge(
                     { type: "skill_chat", mode, message },
                     (text) => emit({ text }),
                     (event) => emit({ tool_event: event }),
                 );
+                if (controller.signal.aborted) return;
                 emit(err ? { error: err } : { done: true });
                 return res.end();
             }
@@ -215,17 +239,17 @@ export async function startServer(inst, { port = 0, callBridge = defaultCallBrid
                     res.statusCode = 400;
                     return json(res, { error: "Select a valid incident demo mode." });
                 }
-                const err = await callBridge({ type: "skill_reset", mode });
+                const err = await invokeBridge({ type: "skill_reset", mode });
                 return json(res, { ok: !err, error: err });
             }
             if (req.method === "POST" && url.pathname === "/api/chat/reset") {
                 const { model } = await readJson(req);
-                const err = await callBridge({ type: "reset", model });
+                const err = await invokeBridge({ type: "reset", model });
                 return json(res, { ok: !err, error: err });
             }
             if (req.method === "GET" && url.pathname === "/api/models") {
                 let text = "";
-                const err = await callBridge({ type: "models" }, (t) => (text += t));
+                const err = await invokeBridge({ type: "models" }, (t) => (text += t));
                 if (err) {
                     res.statusCode = 500;
                     return json(res, { error: err });
@@ -236,7 +260,7 @@ export async function startServer(inst, { port = 0, callBridge = defaultCallBrid
             if (req.method === "POST" && url.pathname === "/api/memory") {
                 const { action } = await readJson(req);
                 let text = "";
-                const err = await callBridge({ type: action === "forget" ? "forget" : "memory", model: "longterm" }, (t) => (text += t));
+                const err = await invokeBridge({ type: action === "forget" ? "forget" : "memory", model: "longterm" }, (t) => (text += t));
                 if (err) return json(res, { error: err });
                 if (action === "forget") return json(res, { favourite_colour: null });
                 return json(res, JSON.parse(text));

@@ -140,6 +140,10 @@
   .bubble.typing::after { content: "▍"; animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
   .composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border-color-default, #30363d); }
+  .composer textarea { min-width: 0; }
+  .cancel-status { margin: 0; padding: 0 12px; color: var(--muted); font-size: 12px; }
+  .cancel-status:empty { display: none; }
+  .cancelled-response { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; }
   .composer textarea {
     flex: 1; resize: none; font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 8px; height: 44px;
     border: 1px solid var(--border-color-default, #30363d); background: transparent; color: inherit;
@@ -600,6 +604,8 @@
   }
   @media (max-width: 560px) {
     body { padding: 12px 14px 28px; }
+    .composer { flex-wrap: wrap; }
+    .composer textarea { flex-basis: 100%; }
     .navbar { grid-template-columns: 1fr auto 1fr; gap: 6px; }
     .navbar .navbtn { padding: 7px 9px; font-size: 13px; }
     .progress { gap: 6px; }
@@ -1027,6 +1033,55 @@
     </div>
   </section>
 <dialog class="code-fullscreen" id="codeFullscreen" aria-label="Fullscreen code panel"></dialog>
+<script id="chat-cancellation">
+  function createChatCancellation(composer, setBusy) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cancel-chat";
+    button.textContent = "Cancel";
+    button.disabled = true;
+    const status = document.createElement("p");
+    status.className = "cancel-status";
+    status.setAttribute("role", "status");
+    composer.append(button);
+    composer.after(status);
+    let active = null;
+    button.addEventListener("click", () => {
+      if (!active) return;
+      const request = active;
+      active = null;
+      request.controller.abort();
+      if (request.bubble) {
+        request.bubble.classList.remove("typing");
+        const label = document.createElement("span");
+        label.className = "cancelled-response";
+        label.textContent = "Response cancelled.";
+        request.bubble.append(label);
+      }
+      status.textContent = "Request cancelled. Remote work already started may continue at the provider; completed tool actions are not undone.";
+      button.disabled = true;
+      setBusy(false);
+      composer.querySelector("textarea").focus();
+    });
+    return {
+      start(bubble = null) {
+        const controller = new AbortController();
+        const request = { controller, signal: controller.signal, bubble };
+        active = request;
+        status.textContent = "";
+        button.disabled = false;
+        return request;
+      },
+      finish(request) {
+        if (active !== request) return false;
+        active = null;
+        button.disabled = true;
+        setBusy(false);
+        return true;
+      },
+    };
+  }
+</script>
 <script id="code-panel-controls">
   const codeFullscreen = document.getElementById("codeFullscreen");
   let expandedCode = null;
@@ -1190,6 +1245,7 @@
     $("model").disabled = value;
     $("newChat").disabled = value;
   }
+  const chatCancellation = createChatCancellation($("composer"), setBusy);
 
   function addMsg(role, text) {
     $("messages").querySelector(".empty")?.remove();
@@ -1210,21 +1266,23 @@
     addMsg("user", message);
     const bubble = addMsg("assistant", "");
     bubble.classList.add("typing");
+    const request = chatCancellation.start(bubble);
     try {
-      const res = await fetch("/api/chat", { method: "POST", body: JSON.stringify({ model: $("model").value, message }) });
+      const res = await fetch("/api/chat", { signal: request.signal, method: "POST", body: JSON.stringify({ model: $("model").value, message }) });
       if (!res.ok) throw new Error(await res.text());
       const reader = res.body.getReader(), dec = new TextDecoder();
       for (;;) {
         const { value, done } = await reader.read();
+        request.signal.throwIfAborted();
         if (done) break;
         bubble.textContent += dec.decode(value, { stream: true });
         $("messages").scrollTop = $("messages").scrollHeight;
       }
     } catch (err) {
-      bubble.textContent = "⚠️ " + err.message;
+      if (!request.signal.aborted) bubble.textContent = "⚠️ " + err.message;
     }
     bubble.classList.remove("typing");
-    setBusy(false); $("prompt").focus();
+    if (chatCancellation.finish(request)) $("prompt").focus();
   }
 
   function highlight(code) {
@@ -1276,17 +1334,19 @@
   $("newChat").onclick = async () => {
     if (busy) return;
     setBusy(true);
+    const request = chatCancellation.start();
     try {
-      const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model: $("model").value }) });
+      const res = await fetch("/api/chat/reset", { signal: request.signal, method: "POST", body: JSON.stringify({ model: $("model").value }) });
       if (!res.ok) throw new Error(await res.text());
       const result = await res.json();
+      request.signal.throwIfAborted();
       if (!result.ok) throw new Error(result.error);
       histories[displayedModel] = "";
       $("messages").innerHTML = `<div class="empty">💬 Send a message to start chatting with the agent</div>`;
     } catch (err) {
-      addMsg("assistant", "⚠️ Could not reset chat: " + err.message);
+      if (!request.signal.aborted) addMsg("assistant", "⚠️ Could not reset chat: " + err.message);
     } finally {
-      setBusy(false);
+      chatCancellation.finish(request);
     }
   };
   $("composer").onsubmit = sendMessage;
@@ -1326,6 +1386,7 @@
       if (v) memoryBusy.add(mode); else memoryBusy.delete(mode);
       memoryRuntime.disabled = memoryBusy.size > 0;
     }
+    const cancellation = createChatCancellation(q(".composer"), setBusy);
     function updateMeta() {
       const runtime = memoryRuntime.value;
       const foundry = runtime === "foundry";
@@ -1363,21 +1424,23 @@
       addMsg("user", message);
       const bubble = addMsg("assistant", "");
       bubble.classList.add("typing");
+      const request = cancellation.start(bubble);
       try {
-        const res = await fetch("/api/chat", { method: "POST", body: JSON.stringify({ model: model(), message }) });
+        const res = await fetch("/api/chat", { signal: request.signal, method: "POST", body: JSON.stringify({ model: model(), message }) });
         if (!res.ok) throw new Error(await res.text());
         const reader = res.body.getReader(), dec = new TextDecoder();
         for (;;) {
           const { value, done } = await reader.read();
+          request.signal.throwIfAborted();
           if (done) break;
           bubble.textContent += dec.decode(value, { stream: true });
           messages.scrollTop = messages.scrollHeight;
         }
       } catch (err) {
-        bubble.textContent = "⚠️ " + err.message;
+        if (!request.signal.aborted) bubble.textContent = "⚠️ " + err.message;
       }
       bubble.classList.remove("typing");
-      setBusy(false); prompt.focus();
+      if (cancellation.finish(request)) prompt.focus();
     }
 
     function closeHood() {
@@ -1414,17 +1477,19 @@
     newChat.onclick = async () => {
       if (busy) return;
       setBusy(true);
+      const request = cancellation.start();
       try {
-        const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model: model() }) });
+        const res = await fetch("/api/chat/reset", { signal: request.signal, method: "POST", body: JSON.stringify({ model: model() }) });
         if (!res.ok) throw new Error(await res.text());
         const result = await res.json();
+        request.signal.throwIfAborted();
         if (!result.ok) throw new Error(result.error);
         messages.innerHTML = emptyHtml;
         histories.delete(displayed);
       } catch (err) {
-        addMsg("assistant", "⚠️ Could not reset chat: " + err.message);
+        if (!request.signal.aborted) addMsg("assistant", "⚠️ Could not reset chat: " + err.message);
       } finally {
-        setBusy(false);
+        cancellation.finish(request);
       }
     };
     q(".composer").onsubmit = sendMessage;
@@ -1486,6 +1551,7 @@
       $("toolsReset").disabled = value;
       if (runtime) runtime.disabled = value;
     };
+    const cancellation = createChatCancellation($("toolsComposer"), setBusy);
     function add(role, text) {
       messages.querySelector(".empty")?.remove();
       const el = document.createElement("div");
@@ -1509,8 +1575,9 @@
       bubble.appendChild(reply);
       bubble.classList.add("typing");
       trace.replaceChildren();
+      const request = cancellation.start(bubble);
       try {
-        const res = await fetch("/api/tools/chat", { method: "POST", body: JSON.stringify({ message, model: model() }) });
+        const res = await fetch("/api/tools/chat", { signal: request.signal, method: "POST", body: JSON.stringify({ message, model: model() }) });
         if (!res.ok) throw new Error(await res.text());
         const reader = res.body.getReader(), decoder = new TextDecoder();
         let buffer = "";
@@ -1557,6 +1624,7 @@
         }
         for (;;) {
           const { value, done } = await reader.read();
+          request.signal.throwIfAborted();
           buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
           let nl;
           while ((nl = buffer.indexOf("\n")) >= 0) {
@@ -1570,12 +1638,13 @@
           }
         }
       } catch (err) {
-        bubble.textContent = "⚠️ " + err.message;
+        if (!request.signal.aborted) bubble.textContent = "⚠️ " + err.message;
       } finally {
         bubble.classList.remove("typing");
-        setBusy(false);
-        prompt.focus();
-        messages.scrollTop = messages.scrollHeight;
+        if (cancellation.finish(request)) {
+          prompt.focus();
+          messages.scrollTop = messages.scrollHeight;
+        }
       }
     }
     $("toolsComposer").onsubmit = send;
@@ -1583,17 +1652,19 @@
     $("toolsReset").onclick = async () => {
       if (busy) return;
       setBusy(true);
+      const request = cancellation.start();
       try {
-        const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model: model() }) });
+        const res = await fetch("/api/chat/reset", { signal: request.signal, method: "POST", body: JSON.stringify({ model: model() }) });
         if (!res.ok) throw new Error(await res.text());
         const result = await res.json();
+        request.signal.throwIfAborted();
         if (!result.ok) throw new Error(result.error);
         messages.replaceChildren();
         trace.textContent = "No calls yet.";
       } catch (err) {
-        add("assistant", "⚠️ " + err.message);
+        if (!request.signal.aborted) add("assistant", "⚠️ " + err.message);
       } finally {
-        setBusy(false);
+        cancellation.finish(request);
       }
     };
     if (runtime) runtime.onchange = () => {
@@ -1685,13 +1756,17 @@
       resetButton.disabled = value;
       sampleButton.disabled = value;
     }
+    const cancellation = createChatCancellation(document.getElementById("incidentComposer"), setBusy);
 
-    async function runTurn(message) {
+    async function runTurn(message, request) {
+      request.signal.throwIfAborted();
       addMessage("user", message);
       const bubble = addMessage("assistant", "");
+      request.bubble = bubble;
       bubble.classList.add("typing");
       try {
         const response = await fetch("/api/skills/chat", {
+          signal: request.signal,
           method: "POST",
           body: JSON.stringify({ message, mode: mode.value }),
         });
@@ -1707,6 +1782,7 @@
         }
         for (;;) {
           const { value, done } = await reader.read();
+          request.signal.throwIfAborted();
           buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
           let newline;
           while ((newline = buffer.indexOf("\n")) >= 0) {
@@ -1720,10 +1796,11 @@
           }
         }
       } catch (error) {
+        if (request.signal.aborted) throw error;
         bubble.textContent = "⚠️ " + error.message;
       } finally {
         bubble.classList.remove("typing");
-        messages.scrollTop = messages.scrollHeight;
+        if (!request.signal.aborted) messages.scrollTop = messages.scrollHeight;
       }
     }
 
@@ -1733,12 +1810,16 @@
       if (!message || busy) return;
       prompt.value = "";
       setBusy(true);
+      const request = cancellation.start();
       try {
-        await runTurn(message);
+        await runTurn(message, request);
+      } catch (error) {
+        if (!request.signal.aborted) addMessage("assistant", "⚠️ " + error.message);
       } finally {
-        saveState(mode.value);
-        setBusy(false);
-        prompt.focus();
+        if (cancellation.finish(request)) {
+          saveState(mode.value);
+          prompt.focus();
+        }
       }
     }
 
@@ -1753,40 +1834,45 @@
     resetButton.onclick = async () => {
       if (busy) return;
       setBusy(true);
+      const request = cancellation.start();
       try {
         const response = await fetch("/api/skills/reset", {
+          signal: request.signal,
           method: "POST",
           body: JSON.stringify({ mode: mode.value }),
         });
         const result = await response.json();
+        request.signal.throwIfAborted();
         if (!response.ok || !result.ok) throw new Error(result.error || "Could not reset the conversation.");
         states.delete(mode.value);
         restoreState(mode.value);
       } catch (error) {
-        addMessage("assistant", "⚠️ " + error.message);
+        if (!request.signal.aborted) addMessage("assistant", "⚠️ " + error.message);
       } finally {
-        setBusy(false);
+        cancellation.finish(request);
       }
     };
 
     sampleButton.onclick = async () => {
       if (busy) return;
       setBusy(true);
+      const request = cancellation.start();
       try {
         const response = await fetch("/api/skills/reset", {
+          signal: request.signal,
           method: "POST",
           body: JSON.stringify({ mode: mode.value }),
         });
         const result = await response.json();
+        request.signal.throwIfAborted();
         if (!response.ok || !result.ok) throw new Error(result.error || "Could not reset the conversation.");
         messages.replaceChildren();
         trace.replaceChildren();
-        for (const message of sampleTurns) await runTurn(message);
+        for (const message of sampleTurns) await runTurn(message, request);
       } catch (error) {
-        addMessage("assistant", "⚠️ " + error.message);
+        if (!request.signal.aborted) addMessage("assistant", "⚠️ " + error.message);
       } finally {
-        saveState(mode.value);
-        setBusy(false);
+        if (cancellation.finish(request)) saveState(mode.value);
       }
     };
 
@@ -1835,6 +1921,7 @@
     const emptyHtml = messages.innerHTML;
     let busy = false;
     const setBusy = (v) => { busy = v; send.disabled = v; newSession.disabled = v; forget.disabled = v; };
+    const cancellation = createChatCancellation(root.querySelector(".composer"), setBusy);
 
     function addMsg(role, text) {
       messages.querySelector(".empty")?.remove();
@@ -1855,9 +1942,10 @@
       if (changed && val) { el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
     }
 
-    async function memory(action) {
-      const res = await fetch("/api/memory", { method: "POST", body: JSON.stringify({ action }) });
+    async function memory(action, signal) {
+      const res = await fetch("/api/memory", { signal, method: "POST", body: JSON.stringify({ action }) });
       const mem = await res.json();
+      signal?.throwIfAborted();
       if (mem.error) throw new Error(mem.error);
       showMemory(mem);
     }
@@ -1870,37 +1958,49 @@
       addMsg("user", message);
       const bubble = addMsg("assistant", "");
       bubble.classList.add("typing");
+      const request = cancellation.start(bubble);
       try {
-        const res = await fetch("/api/chat", { method: "POST", body: JSON.stringify({ model: "longterm", message }) });
+        const res = await fetch("/api/chat", { signal: request.signal, method: "POST", body: JSON.stringify({ model: "longterm", message }) });
         if (!res.ok) throw new Error(await res.text());
         const reader = res.body.getReader(), dec = new TextDecoder();
         for (;;) {
           const { value, done } = await reader.read();
+          request.signal.throwIfAborted();
           if (done) break;
           bubble.textContent += dec.decode(value, { stream: true });
           messages.scrollTop = messages.scrollHeight;
         }
-        await memory("get");
+        bubble.classList.remove("typing");
+        request.bubble = null;
+        await memory("get", request.signal);
       } catch (err) {
-        bubble.textContent = "⚠️ " + err.message;
+        if (!request.signal.aborted) bubble.textContent = "⚠️ " + err.message;
       }
       bubble.classList.remove("typing");
-      setBusy(false); prompt.focus();
+      if (cancellation.finish(request)) prompt.focus();
     }
 
     async function run(fn) {
       if (busy) return;
       setBusy(true);
-      try { await fn(); } catch (err) { addMsg("assistant", "⚠️ " + err.message); } finally { setBusy(false); }
+      const request = cancellation.start();
+      try {
+        await fn(request.signal);
+      } catch (err) {
+        if (!request.signal.aborted) addMsg("assistant", "⚠️ " + err.message);
+      } finally {
+        cancellation.finish(request);
+      }
     }
 
-    newSession.onclick = () => run(async () => {
-      const res = await fetch("/api/chat/reset", { method: "POST", body: JSON.stringify({ model: "longterm" }) });
+    newSession.onclick = () => run(async (signal) => {
+      const res = await fetch("/api/chat/reset", { signal, method: "POST", body: JSON.stringify({ model: "longterm" }) });
       const result = await res.json();
+      signal.throwIfAborted();
       if (!result.ok) throw new Error(result.error);
       messages.innerHTML = emptyHtml;
     });
-    forget.onclick = () => run(async () => { await memory("forget"); messages.innerHTML = emptyHtml; });
+    forget.onclick = () => run(async (signal) => { await memory("forget", signal); messages.innerHTML = emptyHtml; });
 
     function closeHood() {
       hood.className = "hood";

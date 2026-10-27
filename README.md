@@ -53,6 +53,25 @@ needed for the local app.
 
 Stop the app with **Ctrl+C**; this also stops its Python bridge.
 
+### Cancelling requests
+
+Every chat has a **Cancel** button next to **Send**. It is enabled while a chat
+request, reset, or skills sample is running. Cancel stops the active request and
+immediately restores the chat controls, so you can select another model or send
+a new message. The two short-term memory panels cancel independently; their
+shared runtime selector stays disabled while either panel is still working.
+
+Partial replies remain visible and are marked **Response cancelled**. Cancelled
+turns are not committed to the backend conversation or preference memory.
+Cancelling the skills sample also prevents its remaining turns from starting.
+Cancellation closes the local response stream and cancels that request's Python
+task without restarting the bridge or interrupting other chats. Requests for the
+same conversation are serialized while cancellation cleanup finishes.
+
+Remote services may continue work already started even after the client
+disconnects, and completed tool actions cannot be undone. Cancellation does not
+guarantee that cloud usage or charges stop immediately.
+
 ### Fullscreen code panels
 
 Reveal code with **Look under the hood** (or **Show actual SKILL.md** on the
@@ -351,9 +370,13 @@ npm test
 
 The dependency-free Node tests cover the exact eight-screen HTML, reveal/SSE
 state, code views, HTTP request forwarding, streamed chat/tool/skill events,
-backend errors, and standalone startup. They stub agent responses and do not
-contact Ollama or Azure. The Python tests exercise agent behavior with simulated
-model/service responses; live chats require your configured model services.
+backend errors, request cancellation, and standalone startup. Browser checks
+exercise fullscreen and cancellation behavior at desktop and mobile widths,
+using installed Edge/Chrome or the browser executable specified by
+`TEST_BROWSER_PATH`; they are skipped if no supported browser is found.
+They stub agent responses and do not contact Ollama or Azure. The Python tests
+exercise agent behavior, cancellation cleanup, and conversation rollback with
+simulated model/service responses; live chats require your configured model services.
 
 ### Foundry conversation tracing with Application Insights
 
