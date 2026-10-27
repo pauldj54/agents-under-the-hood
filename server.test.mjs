@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { once } from "node:events";
+import childProcess, { spawn } from "node:child_process";
+import { EventEmitter, once } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
+import { PassThrough } from "node:stream";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { freshCards, snapshot, setStage, broadcast, startServer } from "./server.mjs";
+import { freshCards, snapshot, setStage, broadcast, startServer, stopBridge } from "./server.mjs";
 
 async function fixture(t, callBridge) {
     const inst = { cards: freshCards(), clients: new Set() };
@@ -85,6 +87,124 @@ test("serves all existing code snippets, tool bindings, and skill source", async
             assert.match(await response.text(), /calculator/);
         }
     }
+});
+
+test("disconnect cancels only its bridge request before or during streaming", async (t) => {
+    for (const [path, body] of [
+        ["/api/chat", { model: "local", message: "slow" }],
+        ["/api/tools/chat", { model: "tools-foundry", message: "slow" }],
+        ["/api/skills/chat", { mode: "skill", message: "slow" }],
+    ]) {
+        for (const streaming of [false, true]) {
+            await t.test(`${path} ${streaming ? "during" : "before"} streaming`, async (t) => {
+                let enter;
+                let stopped;
+                const entered = new Promise((resolve) => { enter = resolve; });
+                const cancelled = new Promise((resolve) => { stopped = resolve; });
+                const requests = [];
+                const { url } = await fixture(t, (req, onDelta, onTool, signal) => {
+                    requests.push(req);
+                    if (req.message === "next") {
+                        assert.equal(signal.aborted, false);
+                        onDelta("New reply");
+                        return;
+                    }
+                    return new Promise((resolve) => {
+                        signal.addEventListener("abort", () => {
+                            // Late callbacks must be ignored, even if a backend sends them during cleanup.
+                            onDelta("Late reply");
+                            onTool({ status: "late" });
+                            stopped();
+                            resolve("Request cancelled.");
+                        }, { once: true });
+                        if (streaming) onDelta("Partial reply");
+                        enter();
+                    });
+                });
+                const controller = new AbortController();
+                const response = fetch(new URL(path, url), {
+                    method: "POST", body: JSON.stringify(body), signal: controller.signal,
+                });
+                const settled = response.catch((error) => error);
+                await entered;
+                let reader;
+                if (streaming) {
+                    reader = (await response).body.getReader();
+                    assert.match(new TextDecoder().decode((await reader.read()).value), /Partial reply/);
+                }
+                controller.abort();
+                if (reader) await assert.rejects(reader.read(), { name: "AbortError" });
+                else assert.equal((await settled).name, "AbortError");
+                await Promise.race([
+                    cancelled,
+                    new Promise((_, reject) => {
+                        const timer = setTimeout(() => reject(new Error("Cancellation not propagated")), 2000);
+                        timer.unref();
+                    }),
+                ]);
+                const next = await fetch(new URL(path, url), {
+                    method: "POST", body: JSON.stringify({ ...body, message: "next" }),
+                });
+                const text = await next.text();
+                assert.match(text, /New reply/);
+                assert.doesNotMatch(text, /Late reply|cancelled/);
+                assert.equal(requests.length, 2);
+            });
+        }
+    }
+});
+
+test("default bridge sends a targeted cancel command and ignores late replies without killing Python", async (t) => {
+    const child = new EventEmitter();
+    child.stdin = new PassThrough();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    let killed = false;
+    child.kill = () => { killed = true; child.emit("exit", 0); };
+    const commands = [];
+    let received;
+    const commandArrived = () => new Promise((resolve) => { received = resolve; });
+    child.stdin.on("data", (chunk) => {
+        commands.push(JSON.parse(chunk.toString()));
+        received?.();
+    });
+    const spawnMock = t.mock.method(childProcess, "spawn", () => child);
+    syncBuiltinESMExports();
+    t.after(() => {
+        stopBridge();
+        spawnMock.mock.restore();
+        syncBuiltinESMExports();
+    });
+    const reply = (message) => child.stdout.write(JSON.stringify(message) + "\n");
+    const { url } = await fixture(t);
+    const controller = new AbortController();
+    let arrived = commandArrived();
+    const first = fetch(new URL("/api/chat", url), {
+        method: "POST", body: JSON.stringify({ model: "local", message: "slow" }), signal: controller.signal,
+    }).catch((error) => error);
+    await arrived;
+    const firstId = commands[0].id;
+    arrived = commandArrived();
+    controller.abort();
+    await arrived;
+    assert.deepEqual(commands[1], { type: "cancel", id: firstId });
+    assert.equal((await first).name, "AbortError");
+    assert.equal(killed, false);
+
+    arrived = commandArrived();
+    const second = fetch(new URL("/api/chat", url), {
+        method: "POST", body: JSON.stringify({ model: "foundry", message: "next" }),
+    });
+    await arrived;
+    const secondId = commands[2].id;
+    assert.notEqual(firstId, secondId);
+    reply({ id: firstId, delta: "STALE" });
+    reply({ id: firstId, cancelled: true, done: true });
+    reply({ id: secondId, delta: "New reply" });
+    reply({ id: secondId, done: true });
+    assert.equal(await (await second).text(), "New reply");
+    assert.equal(killed, false);
+    assert.equal(commands.length, 3);
 });
 
 test("forwards chat streams, tool events, models, memory, and reset requests", async (t) => {

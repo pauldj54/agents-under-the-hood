@@ -4,6 +4,8 @@ Reads JSON lines on stdin and streams JSON lines on stdout:
   -> {"id": 1, "type": "chat", "model": "local", "message": "Hi"}
   <- {"id": 1, "delta": "Hel"} ... {"id": 1, "done": true}  or  {"id": 1, "error": "..."}
   -> {"id": 2, "type": "reset", "model": "local"}
+  -> {"id": 1, "type": "cancel"}
+  <- {"id": 1, "cancelled": true, "done": true}
 
 The "foundry" model uses MAI-Thinking-1 with the Azure CLI's Entra sign-in.
 Configure AZURE_TENANT_ID and FOUNDRY_PROJECT_ENDPOINT in maf/.env,
@@ -19,6 +21,8 @@ import importlib
 import json
 import os
 import sys
+from contextlib import aclosing
+from copy import deepcopy
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -36,6 +40,7 @@ def send(obj):
 
 async def handle(req):
     rid = req.get("id")
+    restore = None
     try:
         if req["type"] in ("skill_chat", "skill_reset"):
             skill_agent = importlib.import_module("incident_triage_agent")
@@ -43,9 +48,22 @@ async def handle(req):
             if req["type"] == "skill_reset":
                 skill_agent.reset(mode)
             else:
+                previous = skill_agent._runtimes.get(mode)
+                saved = None if previous is None else {
+                    **previous, "session": deepcopy(previous["session"]),
+                    "history": list(previous["history"]),
+                }
+
+                def restore():
+                    if saved is None:
+                        skill_agent._runtimes.pop(mode, None)
+                    else:
+                        skill_agent._runtimes[mode] = saved
+
                 stream = skill_agent.chat(req["message"], mode, lambda event: send({"id": rid, "tool_event": event}))
-                async for text in stream:
-                    send({"id": rid, "delta": text})
+                async with aclosing(stream):
+                    async for text in stream:
+                        send({"id": rid, "delta": text})
             send({"id": rid, "done": True})
             return
         if req["type"] == "models":
@@ -88,25 +106,70 @@ async def handle(req):
         elif req["type"] == "memory":
             send({"id": rid, "delta": selected_agent.memory.model_dump_json()})
         else:
+            session = deepcopy(getattr(selected_agent, "session", None))
+            colour = selected_agent.memory.favourite_colour if req["model"] == "longterm" else None
+
+            def restore():
+                if hasattr(selected_agent, "session"):
+                    selected_agent.session = session
+                if req["model"] == "longterm":
+                    selected_agent.memory.favourite_colour = colour
+
             stream = (
                 selected_agent.chat(req["message"], lambda event: send({"id": rid, "tool_event": event}))
                 if req["model"] in ("calculator", "tools-local", "tools-foundry")
                 else selected_agent.chat(req["message"])
             )
-            async for text in stream:
-                send({"id": rid, "delta": text})
+            async with aclosing(stream):
+                async for text in stream:
+                    send({"id": rid, "delta": text})
         send({"id": rid, "done": True})
+    except asyncio.CancelledError:
+        if restore:
+            restore()
+        raise
     except Exception as exc:  # report every failure back to the UI
         send({"id": rid, "error": f"{type(exc).__name__}: {exc}"})
 
 
+async def serve(readline):
+    # Serialize each conversation while allowing cancellation and other chats to proceed.
+    tasks = {}
+    locks = {}
+
+    async def run(req):
+        key = ("skill", req.get("mode")) if req["type"].startswith("skill_") else ("model", req.get("model"))
+        try:
+            async with locks.setdefault(key, asyncio.Lock()):
+                await handle(req)
+        except asyncio.CancelledError:
+            send({"id": req["id"], "cancelled": True, "done": True})
+        finally:
+            tasks.pop(req["id"], None)
+
+    try:
+        while True:
+            line = await readline()
+            if not line:
+                break
+            if not line.strip():
+                continue
+            req = json.loads(line)
+            if req["type"] == "cancel":
+                task = tasks.get(req["id"])
+                if task:
+                    task.cancel()
+            else:
+                tasks[req["id"]] = asyncio.create_task(run(req))
+    finally:
+        remaining = list(tasks.values())
+        for task in remaining:
+            task.cancel()
+        await asyncio.gather(*remaining, return_exceptions=True)
+
+
 async def main():
-    while True:
-        line = await asyncio.to_thread(sys.stdin.readline)
-        if not line:
-            break
-        if line.strip():
-            await handle(json.loads(line))
+    await serve(lambda: asyncio.to_thread(sys.stdin.readline))
 
 
 if __name__ == "__main__":
