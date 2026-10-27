@@ -53,6 +53,16 @@ needed for the local app.
 
 Stop the app with **Ctrl+C**; this also stops its Python bridge.
 
+### Fullscreen code panels
+
+Reveal code with **Look under the hood** (or **Show actual SKILL.md** on the
+Skills screen), then use **Full screen** above any code box to expand it to the
+website's full viewport. Tool binding and definition boxes expand independently.
+Press **Esc** or select the **X** in the top-right corner to return to the normal
+layout. Code remains scrollable, and exiting restores the original panel and
+keyboard focus without resetting the conversation or changing the code.
+Fullscreen controls are also available on calculator execution traces.
+
 ### UI themes
 
 Use **Theme** in the top-right navigation to choose **Default**, **Agents im
