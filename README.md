@@ -85,12 +85,14 @@ Fullscreen controls are also available on calculator execution traces.
 ### UI themes
 
 Use **Theme** in the top-right navigation to choose **Default**, **Agents im
-Weggla**, or **Halloween**. Default preserves the original slate-and-teal
-appearance and is selected on a fresh browser profile. Agents im Weggla takes
-its plum, pink, yellow, and typography cues from the
+Weggla**, **Halloween**, or **Europe North**. Default preserves the original
+slate-and-teal appearance and is selected on a fresh browser profile. Agents im
+Weggla takes its plum, pink, yellow, and typography cues from the
 [meetup website](https://agentsimweggla.de/meetups/02-oktober/); Halloween pairs
 pumpkin orange and spectral lavender. Every Halloween screen shows a pumpkin
 agent on the left and a bat and ghost on the right, aligned above the heading.
+Europe North uses deep blue-green surfaces, turquoise and mint gradients, and
+subtle geometric lines with translucent, rounded panels.
 
 Themes apply to all eight screens without resetting cards, conversations, model
 choices, or navigation. The browser remembers your choice on the same origin
