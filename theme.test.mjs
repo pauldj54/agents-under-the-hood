@@ -43,7 +43,7 @@ test("fresh and invalid preferences preserve Default; known themes restore befor
         assert.equal(ui.select.value, "default");
         assert.equal(ui.writes.length, 0);
     }
-    for (const saved of ["agents-im-weggla", "halloween"]) {
+    for (const saved of ["agents-im-weggla", "halloween", "europe-north"]) {
         const ui = fixture({ saved });
         assert.equal(ui.dataset.theme, saved);
         assert.equal(ui.select.value, saved);
@@ -53,7 +53,7 @@ test("fresh and invalid preferences preserve Default; known themes restore befor
 
 test("all themes can be selected, persisted, and restored including Default", () => {
     const ui = fixture();
-    for (const theme of ["agents-im-weggla", "halloween", "default"]) {
+    for (const theme of ["agents-im-weggla", "halloween", "europe-north", "default"]) {
         ui.change(theme);
         assert.equal(ui.dataset.theme, theme);
         assert.deepEqual(ui.writes.at(-1), ["agents-under-the-hood.theme", theme]);
@@ -61,15 +61,15 @@ test("all themes can be selected, persisted, and restored including Default", ()
     }
     ui.change("invalid");
     assert.equal(ui.dataset.theme, "default");
-    assert.equal(ui.writes.length, 3);
+    assert.equal(ui.writes.length, 4);
 });
 
 test("blocked storage reports failures while allowing theme changes", () => {
     const ui = fixture({ readError: true, writeError: true });
     assert.equal(ui.dataset.theme, "default");
     assert.match(ui.status.textContent, /could not be read/);
-    ui.change("halloween");
-    assert.equal(ui.dataset.theme, "halloween");
+    ui.change("europe-north");
+    assert.equal(ui.dataset.theme, "europe-north");
     assert.match(ui.status.textContent, /could not be saved/);
     assert.equal(ui.warnings.length, 2);
     const recovered = fixture({ readError: true });
@@ -89,4 +89,14 @@ test("Halloween artwork is shared across every screen and hidden in other themes
     assert.equal([...artwork[1].matchAll(/<svg /g)].length, 3);
     assert.match(html, /\.theme-art\s*\{\s*display:\s*none;/);
     assert.match(html, /:root\[data-theme="halloween"\] \.theme-art\s*\{\s*display:\s*flex;/);
+});
+
+test("Europe North is selectable and styles every screen with accessible teal surfaces", () => {
+    assert.match(html, /<option value="europe-north">Europe North<\/option>/);
+    assert.equal([...html.matchAll(/<section class="screen">/g)].length, 8);
+    assert.match(html, /:root\[data-theme="europe-north"\]\s*\{[\s\S]*?--ink:\s*#062a31;[\s\S]*?--paper:\s*#f0fffb;[\s\S]*?--signal:\s*#68e4d0;/);
+    assert.match(html, /:root\[data-theme="europe-north"\] body\s*\{[\s\S]*?repeating-linear-gradient/);
+    assert.match(html, /:root\[data-theme="europe-north"\] \.panel,[\s\S]*?backdrop-filter:\s*blur\(12px\)/);
+    assert.match(html, /:focus-visible\s*\{\s*outline:\s*2px solid var\(--signal\)/);
+    assert.match(html, /:root\[data-theme="europe-north"\] \.s3-head h1/);
 });

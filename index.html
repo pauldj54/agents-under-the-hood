@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Agents Under the Hood</title>
 <script id="theme-restore">
-  const themeIds = ["default", "agents-im-weggla", "halloween"];
+  const themeIds = ["default", "agents-im-weggla", "halloween", "europe-north"];
   const themeStorageKey = "agents-under-the-hood.theme";
   try {
     const savedTheme = localStorage.getItem(themeStorageKey);
@@ -269,8 +269,71 @@
     --display-font: Georgia, "Times New Roman", serif;
     --llm-fill: var(--signal);
   }
+  :root[data-theme="europe-north"] {
+    --ink: #062a31;
+    --panel: #0c4149;
+    --panel-raised: #12535a;
+    --paper: #f0fffb;
+    --muted: #add2ce;
+    --rule: #397b7c;
+    --signal: #68e4d0;
+    --signal-hover: #a4f5e5;
+    --brass: #b9efb6;
+    --blue: #8bdced;
+    --code-background: #042329;
+    --placeholder: #9cc4c1;
+    --syntax-keyword: #ffd28b;
+    --syntax-string: #9df0d2;
+    --syntax-comment: #a5c6b7;
+    --syntax-function: #9bd9f0;
+    --display-font: "Segoe UI Variable", "Segoe UI", sans-serif;
+    --llm-fill: var(--signal);
+  }
   :root:not([data-theme="default"]) body {
     background: radial-gradient(ellipse at 90% 0%, color-mix(in srgb, var(--signal) 10%, transparent), transparent 55%), var(--ink);
+  }
+  :root[data-theme="europe-north"] body {
+    background:
+      radial-gradient(ellipse at 12% 0%, color-mix(in srgb, #20bcae 20%, transparent), transparent 44%),
+      radial-gradient(ellipse at 90% 18%, color-mix(in srgb, #8ee6b2 12%, transparent), transparent 42%),
+      repeating-linear-gradient(135deg, transparent 0 74px, rgb(132 237 220 / 5%) 75px, transparent 76px),
+      repeating-linear-gradient(45deg, transparent 0 128px, rgb(132 237 220 / 3%) 129px, transparent 130px),
+      var(--ink);
+    background-attachment: fixed;
+  }
+  :root[data-theme="europe-north"] .navbar {
+    border-color: color-mix(in srgb, var(--signal) 28%, var(--rule));
+    background: color-mix(in srgb, var(--ink) 82%, transparent);
+  }
+  :root[data-theme="europe-north"] .card,
+  :root[data-theme="europe-north"] .panel,
+  :root[data-theme="europe-north"] .composer,
+  :root[data-theme="europe-north"] .memcard,
+  :root[data-theme="europe-north"] .bubble {
+    border-color: color-mix(in srgb, var(--signal) 26%, var(--rule));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--panel) 84%, transparent);
+    backdrop-filter: blur(12px);
+  }
+  :root[data-theme="europe-north"] .memcard { border-left-color: var(--signal); }
+  :root[data-theme="europe-north"] .card:hover {
+    border-color: var(--signal);
+    border-left-color: var(--signal);
+    background: color-mix(in srgb, var(--panel-raised) 90%, transparent);
+  }
+  :root[data-theme="europe-north"] button,
+  :root[data-theme="europe-north"] select,
+  :root[data-theme="europe-north"] .composer textarea,
+  :root[data-theme="europe-north"] pre.code,
+  :root[data-theme="europe-north"] .incident-trace pre {
+    border-radius: 8px;
+  }
+  :root[data-theme="europe-north"] .screen > header h1,
+  :root[data-theme="europe-north"] .s3-head h1 {
+    background: linear-gradient(105deg, #f0fffb, #83ecd5 72%, #a9edbd);
+    background-clip: text;
+    color: transparent;
+    width: fit-content;
   }
   :root[data-theme="agents-im-weggla"] .screen > header h1,
   :root[data-theme="agents-im-weggla"] .s3-head h1 {
@@ -309,7 +372,9 @@
   }
   @media (forced-colors: active) {
     :root[data-theme="agents-im-weggla"] .screen > header h1,
-    :root[data-theme="agents-im-weggla"] .s3-head h1 { background: none; color: CanvasText; }
+    :root[data-theme="agents-im-weggla"] .s3-head h1,
+    :root[data-theme="europe-north"] .screen > header h1,
+    :root[data-theme="europe-north"] .s3-head h1 { background: none; color: CanvasText; }
   }
   html { min-width: 320px; }
   body {
@@ -643,6 +708,7 @@
           <option value="default">Default</option>
           <option value="agents-im-weggla">Agents im Weggla</option>
           <option value="halloween">Halloween</option>
+          <option value="europe-north">Europe North</option>
         </select>
       </label>
     </div>
